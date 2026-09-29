@@ -2,10 +2,13 @@ import React, { useState } from 'react';
 import { User } from './types';
 import { authService } from './services/authService';
 import { AppLayout } from './components/layout/AppLayout';
+
 import {
   ToastContainer,
   ToastMessage,
 } from './components/common/Toast';
+
+import { ErrorPage } from './components/common/ErrorPage';
 
 // Pages
 import { LoginPage } from './pages/LoginPage';
@@ -19,9 +22,30 @@ import { TimetableViewPage } from './pages/TimetableViewPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
 
+/*
+ * Pages currently supported by the application.
+ *
+ * If currentPage somehow contains another value,
+ * the 404 page will be displayed instead of a blank screen.
+ */
+const VALID_PAGES = [
+  'dashboard',
+  'timetable',
+  'teachers',
+  'subjects',
+  'classes',
+  'availability',
+  'generate',
+  'profile',
+  'settings',
+];
+
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<User | null>(
-    () => {
+  /*
+   * Restore authenticated user from localStorage.
+   */
+  const [currentUser, setCurrentUser] =
+    useState<User | null>(() => {
       const user = authService.getCurrentUser();
 
       if (!user || !authService.isAuthenticated()) {
@@ -29,19 +53,29 @@ export default function App() {
       }
 
       return user;
-    }
-  );
+    });
 
+  /*
+   * Current application page.
+   */
   const [currentPage, setCurrentPage] =
     useState<string>('dashboard');
 
+  /*
+   * Login error shown on LoginPage.
+   */
   const [loginError, setLoginError] =
     useState<string>('');
 
+  /*
+   * Toast notifications.
+   */
   const [toasts, setToasts] =
     useState<ToastMessage[]>([]);
 
-  // Trigger state for opening modals when navigating
+  /*
+   * One-time modal triggers.
+   */
   const [openAddTeacherOnMount, setOpenAddTeacherOnMount] =
     useState(false);
 
@@ -51,6 +85,9 @@ export default function App() {
   const [openAddSectionOnMount, setOpenAddSectionOnMount] =
     useState(false);
 
+  /*
+   * Show toast.
+   */
   const showToast = (
     message: string,
     type: 'success' | 'error' | 'info' = 'info'
@@ -69,14 +106,17 @@ export default function App() {
 
     setTimeout(() => {
       setToasts(prev =>
-        prev.filter(t => t.id !== id)
+        prev.filter(toast => toast.id !== id)
       );
     }, 4500);
   };
 
+  /*
+   * Dismiss toast.
+   */
   const handleDismissToast = (id: string) => {
     setToasts(prev =>
-      prev.filter(t => t.id !== id)
+      prev.filter(toast => toast.id !== id)
     );
   };
 
@@ -89,33 +129,46 @@ export default function App() {
   ) => {
     setLoginError('');
 
-    const result = await authService.login(
-      email,
-      password
-    );
-
-    if (!result.success || !result.user) {
-      setLoginError(
-        result.error || 'Login failed.'
+    try {
+      const result = await authService.login(
+        email,
+        password
       );
 
-      return;
+      if (!result.success || !result.user) {
+        setLoginError(
+          result.error || 'Login failed.'
+        );
+
+        return;
+      }
+
+      setCurrentUser(result.user);
+      setCurrentPage('dashboard');
+
+      showToast(
+        `Signed in as ${result.user.name}`,
+        'success'
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unable to sign in.';
+
+      setLoginError(message);
     }
-
-    setCurrentUser(result.user);
-    setCurrentPage('dashboard');
-
-    showToast(
-      `Signed in as ${result.user.name}`,
-      'success'
-    );
   };
 
+  /*
+   * Logout.
+   */
   const handleLogout = () => {
     authService.logout();
 
     setCurrentUser(null);
     setCurrentPage('dashboard');
+    setLoginError('');
 
     showToast(
       'You have been logged out',
@@ -124,7 +177,7 @@ export default function App() {
   };
 
   /*
-   * Role switching is no longer a fake local persona switch.
+   * Role switching is intentionally disabled.
    *
    * The backend determines the authenticated user's role.
    */
@@ -135,7 +188,13 @@ export default function App() {
     );
   };
 
+  /*
+   * Navigate between application pages.
+   */
   const handleNavigate = (page: string) => {
+    /*
+     * Reset one-time modal triggers.
+     */
     setOpenAddTeacherOnMount(false);
     setOpenAddSubjectOnMount(false);
     setOpenAddSectionOnMount(false);
@@ -143,24 +202,40 @@ export default function App() {
     setCurrentPage(page);
   };
 
-  // Quick Action handlers
+  /*
+   * Quick Action:
+   * Open Add Teacher modal.
+   */
   const handleOpenAddTeacher = () => {
     setOpenAddTeacherOnMount(true);
     setCurrentPage('teachers');
   };
 
+  /*
+   * Quick Action:
+   * Open Add Subject modal.
+   */
   const handleOpenAddSubject = () => {
     setOpenAddSubjectOnMount(true);
     setCurrentPage('subjects');
   };
 
+  /*
+   * Quick Action:
+   * Open Add Section modal.
+   */
   const handleOpenAddSection = () => {
     setOpenAddSectionOnMount(true);
     setCurrentPage('classes');
   };
 
   /*
-   * Not authenticated → Login page.
+   * -------------------------------------------------------
+   * AUTHENTICATION GUARD
+   * -------------------------------------------------------
+   *
+   * If there is no authenticated user,
+   * show the login page.
    */
   if (!currentUser) {
     return (
@@ -179,7 +254,20 @@ export default function App() {
   }
 
   /*
-   * Authenticated application.
+   * -------------------------------------------------------
+   * UNKNOWN PAGE DETECTION
+   * -------------------------------------------------------
+   *
+   * This prevents an invalid currentPage from producing
+   * a blank application area.
+   */
+  const isValidPage =
+    VALID_PAGES.includes(currentPage);
+
+  /*
+   * -------------------------------------------------------
+   * AUTHENTICATED APPLICATION
+   * -------------------------------------------------------
    */
   return (
     <AppLayout
@@ -189,16 +277,25 @@ export default function App() {
       onRoleSwitch={handleRoleSwitch}
       onLogout={handleLogout}
     >
+
+      {/* DASHBOARD */}
       {currentPage === 'dashboard' && (
         <DashboardPage
           currentUser={currentUser}
           onNavigate={handleNavigate}
-          onOpenAddTeacher={handleOpenAddTeacher}
-          onOpenAddSubject={handleOpenAddSubject}
-          onOpenAddSection={handleOpenAddSection}
+          onOpenAddTeacher={
+            handleOpenAddTeacher
+          }
+          onOpenAddSubject={
+            handleOpenAddSubject
+          }
+          onOpenAddSection={
+            handleOpenAddSection
+          }
         />
       )}
 
+      {/* TIMETABLE */}
       {currentPage === 'timetable' && (
         <TimetableViewPage
           currentUser={currentUser}
@@ -209,6 +306,7 @@ export default function App() {
         />
       )}
 
+      {/* TEACHERS */}
       {currentPage === 'teachers' && (
         <TeachersPage
           onShowToast={showToast}
@@ -218,6 +316,7 @@ export default function App() {
         />
       )}
 
+      {/* SUBJECTS */}
       {currentPage === 'subjects' && (
         <SubjectsPage
           onShowToast={showToast}
@@ -227,6 +326,7 @@ export default function App() {
         />
       )}
 
+      {/* CLASSES / SECTIONS */}
       {currentPage === 'classes' && (
         <ClassesSectionsPage
           onShowToast={showToast}
@@ -236,12 +336,14 @@ export default function App() {
         />
       )}
 
+      {/* TEACHER AVAILABILITY */}
       {currentPage === 'availability' && (
         <AvailabilityPage
           onShowToast={showToast}
         />
       )}
 
+      {/* GENERATE TIMETABLE */}
       {currentPage === 'generate' && (
         <GenerateTimetablePage
           onGenerationComplete={() =>
@@ -251,6 +353,7 @@ export default function App() {
         />
       )}
 
+      {/* PROFILE */}
       {currentPage === 'profile' && (
         <ProfilePage
           currentUser={currentUser}
@@ -259,16 +362,33 @@ export default function App() {
         />
       )}
 
+      {/* SETTINGS */}
       {currentPage === 'settings' && (
         <SettingsPage
           onShowToast={showToast}
         />
       )}
 
+      {/* -------------------------------------------------
+          404 FALLBACK
+          ------------------------------------------------- */}
+      {!isValidPage && (
+        <ErrorPage
+          type="404"
+          title="Page Not Found"
+          message="The page you are trying to access does not exist or is no longer available."
+          onGoHome={() =>
+            handleNavigate('dashboard')
+          }
+        />
+      )}
+
+      {/* GLOBAL TOASTS */}
       <ToastContainer
         toasts={toasts}
         onDismiss={handleDismissToast}
       />
+
     </AppLayout>
   );
 }
