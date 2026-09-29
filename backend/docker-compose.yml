@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-timegen}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-timegen}
+      POSTGRES_DB: ${POSTGRES_DB:-timegen_ai}
+    ports:
+      - "5432:5432"
+    volumes:
+      - timegen_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-timegen}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_SERVER: db
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m app.db.init_db &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  timegen_pgdata:

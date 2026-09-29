@@ -1,0 +1,7 @@
+{
+  "name": "TimeGen AI",
+  "description": "Smarter Timetables, Powered by AI. Modern school timetable generation platform for conflict-free scheduling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
