@@ -21,6 +21,7 @@ import { GenerateTimetablePage } from './pages/GenerateTimetablePage';
 import { TimetableViewPage } from './pages/TimetableViewPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
+import  PermissionsPage  from './pages/PermissionsPage';
 
 /*
  * Pages currently supported by the application.
@@ -36,6 +37,7 @@ const VALID_PAGES = [
   'classes',
   'availability',
   'generate',
+  'permissions',
   'profile',
   'settings',
 ];
@@ -255,11 +257,50 @@ export default function App() {
 
   /*
    * -------------------------------------------------------
-   * UNKNOWN PAGE DETECTION
+   * PAGE ACCESS GUARD
    * -------------------------------------------------------
    *
-   * This prevents an invalid currentPage from producing
-   * a blank application area.
+   * Permissions page is an ADMIN-only page.
+   *
+   * Even if someone manually sets:
+   *
+   * currentPage = "permissions"
+   *
+   * a Principal or Teacher should not see the page.
+   */
+  if (
+    currentPage === 'permissions' &&
+    currentUser.role !== 'admin'
+  ) {
+    return (
+      <AppLayout
+        currentUser={currentUser}
+        currentPage={currentPage}
+        onNavigate={handleNavigate}
+        onRoleSwitch={handleRoleSwitch}
+        onLogout={handleLogout}
+      >
+        <ErrorPage
+          type="403"
+          title="Access Denied"
+          message="You do not have permission to manage user access."
+          onGoHome={() =>
+            handleNavigate('dashboard')
+          }
+        />
+
+        <ToastContainer
+          toasts={toasts}
+          onDismiss={handleDismissToast}
+        />
+      </AppLayout>
+    );
+  }
+
+  /*
+   * -------------------------------------------------------
+   * UNKNOWN PAGE DETECTION
+   * -------------------------------------------------------
    */
   const isValidPage =
     VALID_PAGES.includes(currentPage);
@@ -351,6 +392,11 @@ export default function App() {
           }
           onShowToast={showToast}
         />
+      )}
+
+      {/* ADMIN - MANAGE ACCESS */}
+      {currentPage === 'permissions' && (
+        <PermissionsPage />
       )}
 
       {/* PROFILE */}
