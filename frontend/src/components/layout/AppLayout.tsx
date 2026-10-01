@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+
 import {
   LayoutDashboard,
   Calendar,
@@ -37,10 +38,16 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   onLogout,
   children,
 }) => {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] =
+    useState(false);
 
-  // Build navigation items based on role
+  const [roleDropdownOpen, setRoleDropdownOpen] =
+    useState(false);
+
+  // --------------------------------------------------
+  // Navigation
+  // --------------------------------------------------
+
   const getNavItems = () => {
     if (currentUser.role === 'admin') {
       return [
@@ -80,14 +87,11 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           icon: Sparkles,
           highlight: true,
         },
-
-        // Admin-only permission management
         {
           id: 'permissions',
           label: 'Manage Access',
           icon: ShieldCheck,
         },
-
         {
           id: 'profile',
           label: 'Profile',
@@ -143,48 +147,38 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
   const navItems = getNavItems();
 
+  // --------------------------------------------------
+  // Navigation handler
+  // --------------------------------------------------
+
   const handleNavClick = (pageId: string) => {
     onNavigate(pageId);
     setMobileMenuOpen(false);
   };
 
-  const roleLabels: Record<
-    UserRole,
-    {
-      title: string;
-      badge: string;
-      color: string;
-    }
-  > = {
-    admin: {
-      title: 'Administrator',
-      badge: 'Admin',
-      color:
-        'bg-blue-50 text-blue-700 border-blue-200',
-    },
-    principal: {
-      title: 'Principal',
-      badge: 'Principal',
-      color:
-        'bg-purple-50 text-purple-700 border-purple-200',
-    },
-    teacher: {
-      title: 'Teacher Faculty',
-      badge: 'Teacher',
-      color:
-        'bg-emerald-50 text-emerald-700 border-emerald-200',
-    },
-  };
+  // --------------------------------------------------
+  // Render
+  // --------------------------------------------------
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col antialiased text-slate-900">
-      {/* Top Bar */}
-      <header className="sticky top-0 z-30 h-15 bg-white border-b border-slate-200/80 px-4 sm:px-6 flex items-center justify-between">
+    <div className="h-screen overflow-hidden bg-slate-50 text-slate-900 flex flex-col antialiased">
+
+      {/* ==================================================
+          TOP HEADER
+      ================================================== */}
+
+      <header className="shrink-0 h-15 bg-white border-b border-slate-200/80 px-4 sm:px-6 flex items-center justify-between z-30">
+
+        {/* Left side */}
         <div className="flex items-center gap-3">
+
+          {/* Mobile menu button */}
           <button
             type="button"
             onClick={() =>
-              setMobileMenuOpen(!mobileMenuOpen)
+              setMobileMenuOpen(
+                !mobileMenuOpen
+              )
             }
             className="md:hidden p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg"
             aria-label="Toggle navigation"
@@ -196,10 +190,12 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             )}
           </button>
 
-          {/* Logo Wordmark */}
+          {/* Logo */}
           <div
             className="flex items-center gap-2.5 cursor-pointer"
-            onClick={() => onNavigate('dashboard')}
+            onClick={() =>
+              onNavigate('dashboard')
+            }
           >
             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold shadow-xs">
               <Sparkles className="w-4.5 h-4.5" />
@@ -219,6 +215,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             </div>
           </div>
 
+          {/* School */}
           <div className="hidden lg:flex items-center gap-2 ml-6 pl-6 border-l border-slate-200 text-xs text-slate-500">
             <School className="w-3.5 h-3.5 text-slate-400" />
 
@@ -228,14 +225,21 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </div>
         </div>
 
-        {/* Right side: Role Switcher & User Profile */}
+        {/* ==================================================
+            RIGHT HEADER
+        ================================================== */}
+
         <div className="flex items-center gap-3">
-          {/* Quick Role Switcher for MVP Testing */}
+
+          {/* Role Switcher */}
           <div className="relative">
+
             <button
               type="button"
               onClick={() =>
-                setRoleDropdownOpen(!roleDropdownOpen)
+                setRoleDropdownOpen(
+                  !roleDropdownOpen
+                )
               }
               className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 transition-colors shadow-2xs"
             >
@@ -252,6 +256,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
             {roleDropdownOpen && (
               <>
+                {/* Click outside */}
                 <div
                   className="fixed inset-0 z-20"
                   onClick={() =>
@@ -259,13 +264,19 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                   }
                 />
 
+                {/* Dropdown */}
                 <div className="absolute right-0 mt-1.5 w-48 bg-white border border-slate-200 rounded-xl shadow-lg p-1.5 z-30">
+
                   <div className="px-2 py-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                     Switch MVP Role
                   </div>
 
                   {(
-                    ['admin', 'principal', 'teacher'] as UserRole[]
+                    [
+                      'admin',
+                      'principal',
+                      'teacher',
+                    ] as UserRole[]
                   ).map((role) => (
                     <button
                       key={role}
@@ -284,7 +295,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                         {role}
                       </span>
 
-                      {currentUser.role === role && (
+                      {currentUser.role ===
+                        role && (
                         <Check className="w-3.5 h-3.5 text-blue-600" />
                       )}
                     </button>
@@ -294,10 +306,12 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             )}
           </div>
 
-          {/* User Profile Mini */}
+          {/* User Profile */}
           <div
             className="flex items-center gap-2.5 pl-2 cursor-pointer"
-            onClick={() => onNavigate('profile')}
+            onClick={() =>
+              onNavigate('profile')
+            }
           >
             <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center font-semibold text-xs shadow-2xs">
               {currentUser.name
@@ -320,75 +334,105 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         </div>
       </header>
 
-      {/* Main Container */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Desktop Sidebar */}
-        <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200/80 p-3 justify-between shrink-0">
-          <div className="space-y-1">
-            <div className="px-3 pt-2 pb-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-              Navigation
-            </div>
+      {/* ==================================================
+          MAIN APPLICATION AREA
+      ================================================== */}
 
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive =
-                currentPage === item.id;
-              const isHighlight = item.highlight;
+      <div className="flex flex-1 min-h-0 overflow-hidden">
 
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() =>
-                    handleNavClick(item.id)
-                  }
-                  className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-medium rounded-xl transition-all ${
-                    isActive
-                      ? isHighlight
-                        ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                        : 'bg-slate-100 text-blue-700 font-semibold'
-                      : isHighlight
-                        ? 'text-blue-700 bg-blue-50/70 hover:bg-blue-100/60 font-semibold'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                  }`}
-                >
-                  <Icon
-                    className={`w-4 h-4 shrink-0 ${
+        {/* ==================================================
+            DESKTOP SIDEBAR
+        ================================================== */}
+
+        <aside className="hidden md:flex w-64 shrink-0 flex-col bg-white border-r border-slate-200/80">
+
+          {/* ----------------------------------------------
+              SCROLLABLE NAVIGATION
+          ---------------------------------------------- */}
+
+          <div className="flex-1 min-h-0 overflow-y-auto p-3">
+
+            <div className="space-y-1">
+
+              <div className="px-3 pt-2 pb-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                Navigation
+              </div>
+
+              {navItems.map((item) => {
+                const Icon = item.icon;
+
+                const isActive =
+                  currentPage === item.id;
+
+                const isHighlight =
+                  item.highlight;
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() =>
+                      handleNavClick(
+                        item.id
+                      )
+                    }
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-medium rounded-xl transition-all ${
                       isActive
                         ? isHighlight
-                          ? 'text-white'
-                          : 'text-blue-600'
+                          ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                          : 'bg-slate-100 text-blue-700 font-semibold'
                         : isHighlight
-                          ? 'text-blue-600'
-                          : 'text-slate-400'
+                          ? 'text-blue-700 bg-blue-50/70 hover:bg-blue-100/60 font-semibold'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                     }`}
-                  />
+                  >
+                    <Icon
+                      className={`w-4 h-4 shrink-0 ${
+                        isActive
+                          ? isHighlight
+                            ? 'text-white'
+                            : 'text-blue-600'
+                          : isHighlight
+                            ? 'text-blue-600'
+                            : 'text-slate-400'
+                      }`}
+                    />
 
-                  <span className="truncate">
-                    {item.label}
-                  </span>
-                </button>
-              );
-            })}
+                    <span className="truncate">
+                      {item.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Bottom user card & logout */}
-          <div className="pt-3 border-t border-slate-100 space-y-1">
+          {/* ----------------------------------------------
+              FIXED LOGOUT AREA
+          ---------------------------------------------- */}
+
+          <div className="shrink-0 p-3 border-t border-slate-100">
+
             <button
               type="button"
               onClick={onLogout}
               className="w-full flex items-center gap-3 px-3 py-2 text-xs font-medium text-slate-500 hover:text-rose-600 hover:bg-rose-50/60 rounded-xl transition-colors"
             >
-              <LogOut className="w-4 h-4 shrink-0 text-slate-400 group-hover:text-rose-600" />
+              <LogOut className="w-4 h-4 shrink-0 text-slate-400" />
 
               <span>Log out</span>
             </button>
           </div>
         </aside>
 
-        {/* Mobile Drawer */}
+        {/* ==================================================
+            MOBILE DRAWER
+        ================================================== */}
+
         {mobileMenuOpen && (
           <div className="fixed inset-0 z-40 md:hidden flex">
+
+            {/* Overlay */}
             <div
               className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs"
               onClick={() =>
@@ -396,10 +440,17 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               }
             />
 
-            <div className="relative w-64 max-w-[80%] bg-white border-r border-slate-200 h-full p-4 flex flex-col justify-between shadow-2xl z-50">
-              <div className="space-y-1">
+            {/* Drawer */}
+            <div className="relative w-64 max-w-[80%] h-full bg-white border-r border-slate-200 flex flex-col shadow-2xl z-50">
+
+              {/* Scrollable mobile navigation */}
+              <div className="flex-1 min-h-0 overflow-y-auto p-4">
+
+                {/* Mobile header */}
                 <div className="flex items-center justify-between pb-3 mb-2 border-b border-slate-100">
+
                   <div className="flex items-center gap-2">
+
                     <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-xs">
                       TG
                     </div>
@@ -412,7 +463,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      setMobileMenuOpen(false)
+                      setMobileMenuOpen(
+                        false
+                      )
                     }
                     className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg"
                   >
@@ -420,38 +473,52 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                   </button>
                 </div>
 
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive =
-                    currentPage === item.id;
-                  const isHighlight = item.highlight;
+                {/* Navigation */}
+                <div className="space-y-1">
 
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() =>
-                        handleNavClick(item.id)
-                      }
-                      className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-medium rounded-xl transition-all ${
-                        isActive
-                          ? isHighlight
-                            ? 'bg-blue-600 text-white font-semibold'
-                            : 'bg-slate-100 text-blue-700 font-semibold'
-                          : isHighlight
-                            ? 'text-blue-700 bg-blue-50 font-semibold'
-                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4 shrink-0" />
+                  {navItems.map((item) => {
+                    const Icon = item.icon;
 
-                      <span>{item.label}</span>
-                    </button>
-                  );
-                })}
+                    const isActive =
+                      currentPage ===
+                      item.id;
+
+                    const isHighlight =
+                      item.highlight;
+
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() =>
+                          handleNavClick(
+                            item.id
+                          )
+                        }
+                        className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-medium rounded-xl transition-all ${
+                          isActive
+                            ? isHighlight
+                              ? 'bg-blue-600 text-white font-semibold'
+                              : 'bg-slate-100 text-blue-700 font-semibold'
+                            : isHighlight
+                              ? 'text-blue-700 bg-blue-50 font-semibold'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4 shrink-0" />
+
+                        <span>
+                          {item.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-100">
+              {/* Fixed mobile logout */}
+              <div className="shrink-0 p-4 border-t border-slate-100">
+
                 <button
                   type="button"
                   onClick={onLogout}
@@ -466,11 +533,16 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </div>
         )}
 
-        {/* Viewport Content Area */}
-        <main className="flex-1 overflow-y-auto min-h-0 bg-slate-50/70 p-4 sm:p-6 lg:p-8">
+        {/* ==================================================
+            MAIN CONTENT
+        ================================================== */}
+
+        <main className="flex-1 min-w-0 min-h-0 overflow-y-auto bg-slate-50/70 p-4 sm:p-6 lg:p-8">
+
           <div className="max-w-7xl mx-auto">
             {children}
           </div>
+
         </main>
       </div>
     </div>
