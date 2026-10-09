@@ -1,9 +1,6 @@
 import { User, UserRole } from '../types';
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_URL ||
-  'http://127.0.0.1:8000/api/v1'
-).replace(/\/$/, '');
+import API_BASE_URL from './apiConfig';
 
 const CURRENT_USER_KEY = 'timegen_current_user';
 const ACCESS_TOKEN_KEY = 'timegen_access_token';
