@@ -23,7 +23,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   loginError,
 }) => {
   const [email, setEmail] = useState('admin@timegen.ai');
-  const [password, setPassword] = useState('TimeGen@123');
+  const [password, setPassword] = useState('timegen@123');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (
