@@ -21,10 +21,9 @@ const getAuthToken = (): string | null => {
   );
 };
 
-const getSchoolId = (): string | null => {
-  const currentUser = authService.getCurrentUser();
 
-  return currentUser?.schoolId || null;
+const getSchoolId = (): string | null => {
+  return authService.getSchoolId();
 };
 
 const apiRequest = async <T>(
