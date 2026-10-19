@@ -105,11 +105,28 @@ export const authService = {
   getSchoolId(): string | null {
     const currentUser = this.getCurrentUser();
 
+    // A principal/teacher must always use their assigned school.
     if (currentUser?.schoolId) {
       return currentUser.schoolId;
     }
 
+    // Admins have no default school; use only a school they selected.
     return localStorage.getItem(SCHOOL_ID_KEY);
+  },
+
+  /** Store a school selected from the real schools returned by the API. */
+  setSelectedSchoolId(schoolId: string): void {
+    const currentUser = this.getCurrentUser();
+
+    if (!currentUser) {
+      throw new Error('You must be logged in to select a school.');
+    }
+
+    if (currentUser.schoolId && currentUser.schoolId !== schoolId) {
+      throw new Error('You can only access your assigned school.');
+    }
+
+    localStorage.setItem(SCHOOL_ID_KEY, schoolId);
   },
 
   /**
