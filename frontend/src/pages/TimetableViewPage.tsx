@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import API_BASE_URL from '../services/apiConfig';
+import { authService } from '../services/authService';
+
 import {
   Calendar,
   Download,
@@ -62,14 +65,12 @@ interface BackendTeacher {
   phone?: string | null;
 }
 
-const API_BASE_URL = 'http://127.0.0.1:8000/api/v1';
-
 const getAuthToken = (): string | null => {
   return localStorage.getItem('timegen_access_token');
 };
 
 const getSchoolId = (): string | null => {
-  return localStorage.getItem('timegen_school_id');
+  return authService.getSchoolId();
 };
 
 const backendRequest = async <T,>(
