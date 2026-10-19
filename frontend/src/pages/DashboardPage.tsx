@@ -1,623 +1,167 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Calendar,
-  Download,
-  RotateCcw,
-  AlertTriangle,
-  CheckCircle2,
-  User as UserIcon,
+  Sparkles,
+  Users,
+  BookOpen,
   Layers,
-  Clock,
+  ArrowRight,
+  Plus,
+  Calendar,
+  CheckCircle2,
+  ExternalLink,
+  Activity,
 } from 'lucide-react';
 
 import {
-  TimetableEntry,
-  TimetableConflict,
-  DayOfWeek,
   User,
-  Subject,
-  Teacher,
+  DayOfWeek,
+  TimetableEntry,
 } from '../types';
 
-import { timetableService } from '../services/timetableService';
-import { sectionService } from '../services/sectionService';
-import { subjectService } from '../services/subjectService';
 import { teacherService } from '../services/teacherService';
-import { DAYS_OF_WEEK, PERIOD_SLOTS } from '../data/mockData';
-import { Modal } from '../components/common/Modal';
-import API_BASE_URL from '../services/apiConfig';
-import { authService } from '../services/authService';
+import { subjectService } from '../services/subjectService';
+import { sectionService } from '../services/sectionService';
+import { timetableService } from '../services/timetableService';
+import { DAYS_OF_WEEK } from '../data/mockData';
 import { TimetableErrorState } from '../components/common/TimetableErrorState';
 
-interface TimetableViewPageProps {
+interface DashboardPageProps {
   currentUser: User;
-  onShowToast: (
-    message: string,
-    type: 'success' | 'error' | 'info'
-  ) => void;
-  onNavigateToGenerate: () => void;
+  onNavigate: (page: string) => void;
+  onOpenAddTeacher?: () => void;
+  onOpenAddSubject?: () => void;
+  onOpenAddSection?: () => void;
 }
 
-interface BackendStandard {
-  id: string;
-  name: string;
-  level: number;
-}
-
-interface BackendSection {
-  id: string;
-  name: string;
-  standard_id: string;
-  room_number?: string | null;
-}
-
-interface BackendSubject {
-  id: string;
-  name: string;
-  code: string;
-  weekly_periods: number;
-}
-
-interface BackendTeacher {
-  id: string;
-  name: string;
-  email?: string;
-  phone?: string | null;
-}
-
-const getAuthToken = (): string | null => authService.getAccessToken();
-
-const getSchoolId = (): string | null => authService.getSchoolId();
-
-const backendRequest = async <T,>(
-  endpoint: string
-): Promise<T> => {
-  const token = getAuthToken();
-  const schoolId = getSchoolId();
-
-  if (!token) {
-    throw new Error('You are not authenticated. Please log in again.');
-  }
-
-  if (!schoolId) {
-    throw new Error(
-      'No school is selected. Please log in again.'
-    );
-  }
-
-  const separator = endpoint.includes('?') ? '&' : '?';
-
-  const response = await fetch(
-    `${API_BASE_URL}${endpoint}${separator}school_id=${schoolId}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
-
-  if (!response.ok) {
-    let message = `Request failed with status ${response.status}`;
-
-    try {
-      const data = await response.json();
-
-      if (typeof data?.detail === 'string') {
-        message = data.detail;
-      }
-    } catch {
-      // Keep default message
-    }
-
-    throw new Error(message);
-  }
-
-  return response.json();
-};
-
-const normalizeDay = (day: string): DayOfWeek => {
-  const normalized = day.toLowerCase();
-
-  return (
-    normalized.charAt(0).toUpperCase() +
-    normalized.slice(1)
-  ) as DayOfWeek;
-};
-
-export const TimetableViewPage: React.FC<
-  TimetableViewPageProps
-> = ({
+export const DashboardPage: React.FC<DashboardPageProps> = ({
   currentUser,
-  onShowToast,
-  onNavigateToGenerate,
+  onNavigate,
+  onOpenAddTeacher,
+  onOpenAddSubject,
+  onOpenAddSection,
 }) => {
-  const isTeacher = currentUser.role === 'teacher';
-  const isAdmin = currentUser.role === 'admin';
-
   /*
-   * ============================================================
-   * BACKEND DATA
-   * ============================================================
+   * --------------------------------------------------------------------------
+   * Existing local/frontend data
+   * --------------------------------------------------------------------------
    */
 
-  const [standards, setStandards] = useState<BackendStandard[]>(
-    []
-  );
-
-  const [sections, setSections] = useState<BackendSection[]>(
-    []
-  );
-
-  const [subjects, setSubjects] = useState<BackendSubject[]>(
-    []
-  );
-
-  const [teachers, setTeachers] = useState<BackendTeacher[]>(
-    []
-  );
-
-  const [entries, setEntries] = useState<TimetableEntry[]>(
-    []
-  );
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const teachers = teacherService.getTeachers();
+  const standards = sectionService.getStandards();
+  const sections = sectionService.getSections();
+  const subjects = subjectService.getSubjects();
 
   /*
-   * ============================================================
-   * VIEW STATE
-   * ============================================================
+   * --------------------------------------------------------------------------
+   * Backend timetable state
+   *
+   * timetableService.getEntries() is async because timetable data now comes
+   * from FastAPI/PostgreSQL instead of localStorage.
+   * --------------------------------------------------------------------------
    */
 
-  const [viewMode, setViewMode] = useState<
-    'by_section' | 'by_teacher'
-  >(isTeacher ? 'by_teacher' : 'by_section');
-
-  const [selectedStandardId, setSelectedStandardId] =
-    useState<string>('');
-
-  const [selectedSectionId, setSelectedSectionId] =
-    useState<string>('');
-
-  const [selectedTeacherId, setSelectedTeacherId] =
-    useState<string>(
-      currentUser.teacherId || ''
-    );
+  const [allEntries, setAllEntries] = useState<TimetableEntry[]>([]);
+  const [timetableLoading, setTimetableLoading] = useState(true);
+  const [timetableError, setTimetableError] = useState<string | null>(null);
 
   /*
-   * ============================================================
-   * EDIT MODAL
-   * ============================================================
-   */
-
-  const [isEditModalOpen, setIsEditModalOpen] =
-    useState(false);
-
-  const [editingCell, setEditingCell] = useState<{
-    sectionId: string;
-    day: DayOfWeek;
-    period: number;
-    subjectId: string;
-    teacherId: string;
-  } | null>(null);
-
-  const [simulatedConflict, setSimulatedConflict] =
-    useState<TimetableConflict | null>(null);
-
-  const [isSaving, setIsSaving] = useState(false);
-
-  /*
-   * ============================================================
-   * LOAD ALL BACKEND DATA
-   * ============================================================
-   */
-
-  const loadTimetableData = async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const [
-        backendStandards,
-        backendSections,
-        backendSubjects,
-        backendTeachers,
-        backendEntries,
-      ] = await Promise.all([
-        backendRequest<BackendStandard[]>(
-          '/academic/standards'
-        ),
-        backendRequest<BackendSection[]>(
-          '/academic/sections'
-        ),
-        backendRequest<BackendSubject[]>(
-          '/subjects'
-        ),
-        backendRequest<BackendTeacher[]>(
-          '/teachers'
-        ),
-        timetableService.getEntries(),
-      ]);
-
-      setStandards(backendStandards);
-      setSections(backendSections);
-      setSubjects(backendSubjects);
-      setTeachers(backendTeachers);
-      setEntries(backendEntries);
-
-      /*
-       * Select first standard automatically.
-       */
-      if (
-        backendStandards.length > 0 &&
-        !selectedStandardId
-      ) {
-        setSelectedStandardId(
-          backendStandards[0].id
-        );
-      }
-
-      /*
-       * Select first teacher automatically.
-       */
-      if (
-        backendTeachers.length > 0 &&
-        !selectedTeacherId
-      ) {
-        setSelectedTeacherId(
-          currentUser.teacherId ||
-            backendTeachers[0].id
-        );
-      }
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Unable to load timetable data.';
-
-      console.error(
-        'Failed to load timetable data:',
-        err
-      );
-
-      setError(message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadTimetableData();
-  }, []);
-
-  /*
-   * ============================================================
-   * DERIVED DATA
-   * ============================================================
-   */
-
-  const standardSections = useMemo(() => {
-    if (!selectedStandardId) {
-      return [];
-    }
-
-    return sections.filter(
-      section =>
-        section.standard_id === selectedStandardId
-    );
-  }, [sections, selectedStandardId]);
-
-  /*
-   * Automatically select first section for selected standard.
+   * Load timetable whenever the authenticated user changes.
+   *
+   * We intentionally use currentUser.id rather than schoolId here because
+   * schoolId is not currently part of the frontend User type.
+   *
+   * timetableService itself gets the school ID from authService.
    */
   useEffect(() => {
-    if (
-      standardSections.length > 0 &&
-      !standardSections.some(
-        section => section.id === selectedSectionId
-      )
-    ) {
-      setSelectedSectionId(
-        standardSections[0].id
-      );
-    }
-  }, [
-    standardSections,
-    selectedSectionId,
-  ]);
+    let cancelled = false;
 
-  const selectedStandard = standards.find(
-    standard =>
-      standard.id === selectedStandardId
-  );
+    const loadTimetable = async () => {
+      try {
+        setTimetableLoading(true);
+        setTimetableError(null);
 
-  const selectedSection = sections.find(
-    section =>
-      section.id === selectedSectionId
-  );
+        const entries = await timetableService.getEntries();
 
-  const currentTeacher = teachers.find(
-    teacher =>
-      teacher.id === selectedTeacherId
-  );
+        if (!cancelled) {
+          setAllEntries(entries);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAllEntries([]);
 
-  const currentEntries = useMemo(() => {
-    if (viewMode === 'by_teacher') {
-      return entries.filter(
-        entry =>
-          entry.teacherId === selectedTeacherId
-      );
-    }
-
-    return entries.filter(
-      entry =>
-        entry.sectionId === selectedSectionId
-    );
-  }, [
-    entries,
-    viewMode,
-    selectedTeacherId,
-    selectedSectionId,
-  ]);
-
-  /*
-   * ============================================================
-   * SUBJECT / TEACHER HELPERS
-   * ============================================================
-   */
-
-  const getSubject = (
-    subjectId: string
-  ): BackendSubject | undefined => {
-    return subjects.find(
-      subject =>
-        subject.id === subjectId
-    );
-  };
-
-  const getTeacher = (
-    teacherId: string
-  ): BackendTeacher | undefined => {
-    return teachers.find(
-      teacher =>
-        teacher.id === teacherId
-    );
-  };
-
-  /*
-   * ============================================================
-   * FIND ENTRY FOR SLOT
-   * ============================================================
-   */
-
-  const getEntryForSlot = (
-    day: DayOfWeek,
-    period: number
-  ): TimetableEntry | undefined => {
-    return currentEntries.find(
-      entry =>
-        normalizeDay(String(entry.day)) === day &&
-        entry.period === period
-    );
-  };
-
-  /*
-   * ============================================================
-   * CELL CLICK
-   * ============================================================
-   */
-
-  const handleCellClick = async (
-    day: DayOfWeek,
-    period: number
-  ) => {
-    if (!isAdmin) {
-      return;
-    }
-
-    if (!selectedSectionId) {
-      onShowToast(
-        'Please select a section first.',
-        'error'
-      );
-      return;
-    }
-
-    /*
-     * Backend lookup instead of synchronous getEntry().
-     */
-    try {
-      const existingEntry =
-        await timetableService.getEntry(
-          selectedSectionId,
-          day,
-          period
-        );
-
-      const firstSubjectId =
-        subjects[0]?.id || '';
-
-      const firstTeacherId =
-        teachers[0]?.id || '';
-
-      setEditingCell({
-        sectionId: selectedSectionId,
-        day,
-        period,
-        subjectId:
-          existingEntry?.subjectId ||
-          firstSubjectId,
-        teacherId:
-          existingEntry?.teacherId ||
-          firstTeacherId,
-      });
-
-      setSimulatedConflict(null);
-      setIsEditModalOpen(true);
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Unable to load timetable slot.';
-
-      onShowToast(message, 'error');
-    }
-  };
-
-  /*
-   * ============================================================
-   * TEACHER CONFLICT CHECK
-   * ============================================================
-   */
-
-  const handleTeacherSelectionChange = async (
-    newTeacherId: string
-  ) => {
-    if (!editingCell) {
-      return;
-    }
-
-    setEditingCell({
-      ...editingCell,
-      teacherId: newTeacherId,
-    });
-
-    try {
-      const conflict =
-        await timetableService.checkProposedConflict(
-          editingCell.sectionId,
-          editingCell.day,
-          editingCell.period,
-          newTeacherId
-        );
-
-      setSimulatedConflict(conflict);
-    } catch (err) {
-      console.error(
-        'Conflict check failed:',
-        err
-      );
-
-      setSimulatedConflict(null);
-    }
-  };
-
-  /*
-   * ============================================================
-   * SAVE CELL
-   * ============================================================
-   */
-
-  const handleSaveCell = async (
-    e: React.FormEvent
-  ) => {
-    e.preventDefault();
-
-    if (!editingCell) {
-      return;
-    }
-
-    setIsSaving(true);
-
-    try {
-      const result =
-        await timetableService.updateEntry(
-          editingCell.sectionId,
-          editingCell.day,
-          editingCell.period,
-          editingCell.subjectId,
-          editingCell.teacherId
-        );
-
-      if (!result.success) {
-        if (result.conflict) {
-          setSimulatedConflict(
-            result.conflict
-          );
-
-          onShowToast(
-            result.conflict.message,
-            'error'
-          );
-        } else {
-          onShowToast(
-            'Unable to update timetable entry.',
-            'error'
+          setTimetableError(
+            error instanceof Error
+              ? error.message
+              : 'Unable to load timetable.'
           );
         }
-
-        return;
+      } finally {
+        if (!cancelled) {
+          setTimetableLoading(false);
+        }
       }
+    };
 
-      /*
-       * Reload timetable from PostgreSQL.
-       */
-      const refreshedEntries =
-        await timetableService.getEntries();
+    loadTimetable();
 
-      setEntries(refreshedEntries);
-
-      setIsEditModalOpen(false);
-      setEditingCell(null);
-      setSimulatedConflict(null);
-
-      onShowToast(
-        `Updated Period ${editingCell.period} successfully.`,
-        'success'
-      );
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Unable to save timetable entry.';
-
-      onShowToast(message, 'error');
-    } finally {
-      setIsSaving(false);
-    }
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser.id]);
 
   /*
-   * ============================================================
-   * DOWNLOAD
-   * ============================================================
+   * --------------------------------------------------------------------------
+   * Teacher-specific information
+   * --------------------------------------------------------------------------
    */
 
-  const handleDownload = () => {
-    onShowToast(
-      'Export functionality will be connected in the next phase.',
-      'info'
-    );
-  };
+  const teacherProfile = teachers.find(
+    t => t.id === (currentUser.teacherId || 't_11')
+  );
+
+  const currentDayIndex = new Date().getDay();
+
+  const todayName: DayOfWeek =
+    currentDayIndex >= 1 && currentDayIndex <= 6
+      ? DAYS_OF_WEEK[currentDayIndex - 1]
+      : 'Monday';
+
+  const teacherTodayClasses = teacherProfile
+    ? allEntries
+        .filter(
+          entry =>
+            entry.teacherId === teacherProfile.id &&
+            entry.day === todayName
+        )
+        .sort((a, b) => a.period - b.period)
+    : [];
+
+  const teacherWeeklyEntries = teacherProfile
+    ? allEntries.filter(
+        entry => entry.teacherId === teacherProfile.id
+      )
+    : [];
 
   /*
-   * ============================================================
-   * REGENERATE
-   * ============================================================
+   * --------------------------------------------------------------------------
+   * Loading state
+   *
+   * Do this AFTER all hooks have been called.
+   * --------------------------------------------------------------------------
    */
 
-  const handleRegenerate = () => {
-    onNavigateToGenerate();
-  };
-
-  /*
-   * ============================================================
-   * LOADING STATE
-   * ============================================================
-   */
-
-  if (isLoading) {
+  if (timetableLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[500px]">
-        <div className="text-center">
-          <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto" />
+      <div className="min-h-[400px] flex items-center justify-center">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-2xs px-8 py-6 text-center">
+          <div className="w-10 h-10 mx-auto mb-4 rounded-full border-4 border-slate-200 border-t-blue-600 animate-spin" />
 
-          <p className="mt-4 text-sm font-semibold text-slate-700">
-            Loading timetable...
-          </p>
+          <h2 className="text-sm font-bold text-slate-900">
+            Loading Dashboard
+          </h2>
 
-          <p className="mt-1 text-xs text-slate-400">
-            Fetching schedule from the server
+          <p className="text-xs text-slate-500 mt-1">
+            Fetching timetable data...
           </p>
         </div>
       </div>
@@ -625,643 +169,708 @@ export const TimetableViewPage: React.FC<
   }
 
   /*
-   * ============================================================
-   * ERROR STATE
-   * ============================================================
+   * --------------------------------------------------------------------------
+   * Error state
+   * --------------------------------------------------------------------------
    */
 
-  if (error) {
+  if (timetableError) {
     return (
       <TimetableErrorState
-        message={error}
-        isAdmin={isAdmin}
-        onRetry={loadTimetableData}
+        message={timetableError}
+        isAdmin={currentUser.role === 'admin'}
+        onRetry={() => window.location.reload()}
       />
     );
   }
 
   /*
-   * ============================================================
-   * MAIN UI
-   * ============================================================
+   * --------------------------------------------------------------------------
+   * Recent mock activities for admin
+   *
+   * These remain frontend-only for now.
+   * --------------------------------------------------------------------------
+   */
+
+  const recentActivities = [
+    {
+      id: '1',
+      action: 'Timetable generated for Academic Year 2026-27',
+      time: '10 mins ago',
+      type: 'generate',
+    },
+    {
+      id: '2',
+      action: 'Teacher availability updated: Mr. Rahul Sharma',
+      time: '1 hour ago',
+      type: 'teacher',
+    },
+    {
+      id: '3',
+      action: 'New section 10C verified with 5 assigned subjects',
+      time: '3 hours ago',
+      type: 'section',
+    },
+    {
+      id: '4',
+      action: 'Subject curriculum quota synchronized for Mathematics',
+      time: 'Yesterday',
+      type: 'subject',
+    },
+  ];
+
+  /*
+   * ==========================================================================
+   * 1. TEACHER VIEW
+   * ==========================================================================
+   */
+
+  if (currentUser.role === 'teacher') {
+    return (
+      <div className="space-y-6">
+
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+              Good Morning, {currentUser.name}
+            </h1>
+
+            <p className="text-xs text-slate-500 mt-1">
+              Mathematics Faculty · Greenwood International School
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onNavigate('timetable')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors shadow-xs"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Open Full Timetable</span>
+          </button>
+        </div>
+
+        {/* Teacher Stat Row */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs">
+            <div className="text-xs font-medium text-slate-500">
+              Today's Teaching Load
+            </div>
+
+            <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+              {teacherTodayClasses.length}{' '}
+              <span className="text-xs font-normal text-slate-400">
+                / 6 periods
+              </span>
+            </div>
+
+            <div className="text-[11px] text-slate-500 mt-2">
+              Active day: {todayName}
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs">
+            <div className="text-xs font-medium text-slate-500">
+              Weekly Total Periods
+            </div>
+
+            <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+              {teacherWeeklyEntries.length}{' '}
+              <span className="text-xs font-normal text-slate-400">
+                periods/wk
+              </span>
+            </div>
+
+            <div className="text-[11px] text-slate-500 mt-2">
+              Max allowed: 25 periods/wk
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs">
+            <div className="text-xs font-medium text-slate-500">
+              Assigned Sections
+            </div>
+
+            <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+              {teacherProfile?.sectionIds.length || 3}
+            </div>
+
+            <div className="text-[11px] text-slate-500 mt-2">
+              Sections:{' '}
+              {teacherProfile?.sectionIds.join(', ') || '8A, 8B, 8C'}
+            </div>
+          </div>
+        </div>
+
+        {/* Today's Schedule Card */}
+        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
+
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">
+                Today's Classes — {todayName}
+              </h2>
+
+              <p className="text-xs text-slate-500">
+                Your scheduled periods for today
+              </p>
+            </div>
+
+            <span className="text-xs font-medium text-slate-500">
+              {teacherTodayClasses.length} scheduled periods
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+
+            {[1, 2, 3, 4, 5, 6].map(pNum => {
+              const entry = teacherTodayClasses.find(
+                e => e.period === pNum
+              );
+
+              const subject = entry
+                ? subjects.find(s => s.id === entry.subjectId)
+                : null;
+
+              return (
+                <div
+                  key={pNum}
+                  className={`p-4 rounded-xl border transition-all ${
+                    entry
+                      ? 'bg-blue-50/50 border-blue-200'
+                      : 'bg-slate-50/60 border-slate-200/60'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+
+                    <span className="text-xs font-bold text-slate-700">
+                      Period {pNum}
+                    </span>
+
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      {pNum === 1
+                        ? '08:30 - 09:15'
+                        : pNum === 2
+                        ? '09:15 - 10:00'
+                        : pNum === 3
+                        ? '10:15 - 11:00'
+                        : pNum === 4
+                        ? '11:00 - 11:45'
+                        : pNum === 5
+                        ? '12:30 - 01:15'
+                        : '01:15 - 02:00'}
+                    </span>
+                  </div>
+
+                  {entry ? (
+                    <div>
+                      <div className="text-sm font-bold text-slate-900">
+                        Class {entry.sectionId}
+                      </div>
+
+                      <div className="text-xs font-medium text-blue-700 mt-0.5">
+                        {subject?.name || 'Mathematics'} (
+                        {subject?.code || 'MATH'})
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-400 italic py-2">
+                      Free Period / Planning
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /*
+   * ==========================================================================
+   * 2. PRINCIPAL VIEW
+   * ==========================================================================
+   */
+
+  if (currentUser.role === 'principal') {
+    return (
+      <div className="space-y-6">
+
+        {/* Header */}
+        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+              Good Morning, {currentUser.name}
+            </h1>
+
+            <p className="text-xs text-slate-500 mt-1">
+              Greenwood International School — Academic Overview &
+              Timetable Health
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onNavigate('timetable')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors shadow-xs"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>View School Timetable</span>
+          </button>
+        </div>
+
+        {/* Summary Metrics */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs">
+            <div className="text-xs font-medium text-slate-500">
+              Total Teachers
+            </div>
+
+            <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+              {teachers.length}
+            </div>
+
+            <div className="text-[11px] text-slate-500 mt-1">
+              Active across 5 standards
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs">
+            <div className="text-xs font-medium text-slate-500">
+              Total Standards
+            </div>
+
+            <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+              {standards.length}
+            </div>
+
+            <div className="text-[11px] text-slate-500 mt-1">
+              Grade 6 through 10
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs">
+            <div className="text-xs font-medium text-slate-500">
+              Total Sections
+            </div>
+
+            <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+              {sections.length}
+            </div>
+
+            <div className="text-[11px] text-slate-500 mt-1">
+              3 sections per standard
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs">
+            <div className="text-xs font-medium text-slate-500">
+              Total Subjects
+            </div>
+
+            <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+              {subjects.length}
+            </div>
+
+            <div className="text-[11px] text-slate-500 mt-1">
+              Curriculum courses
+            </div>
+          </div>
+
+        </div>
+
+        {/* Timetable Status Banner */}
+        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+
+          <div className="flex items-start gap-4">
+
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 shrink-0">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2">
+
+                <h3 className="text-sm font-bold text-slate-900">
+                  School Timetable: Active & Conflict-Free
+                </h3>
+
+                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                  Ready
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-500 mt-1">
+                All 15 sections have full 6-period allocations for Monday
+                through Saturday with 0 teacher double-bookings.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onNavigate('timetable')}
+            className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors"
+          >
+            <span>Inspect Class 8A Schedule</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+
+        </div>
+      </div>
+    );
+  }
+
+  /*
+   * ==========================================================================
+   * 3. ADMIN VIEW
+   * ==========================================================================
    */
 
   return (
     <div className="space-y-6">
 
-      {/* ====================================================== */}
-      {/* HEADER */}
-      {/* ====================================================== */}
-
-      <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Top Welcome Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
 
         <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">
-              {viewMode === 'by_section'
-                ? selectedSection
-                  ? `Class ${selectedStandard?.name || ''} - ${selectedSection.name}`
-                  : 'Class / Section'
-                : currentTeacher?.name ||
-                  'Faculty'}
-            </span>
-
-            <span className="text-slate-300">
-              ·
-            </span>
-
-            <span className="text-xs text-slate-500">
-              Weekly Master Schedule
-            </span>
-          </div>
-
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mt-0.5">
-            {viewMode === 'by_section'
-              ? selectedSection
-                ? `Class ${
-                    selectedStandard?.name || ''
-                  } ${
-                    selectedSection.name
-                  } — Weekly Timetable`
-                : 'Weekly Timetable'
-              : `${
-                  currentTeacher?.name ||
-                  'Faculty'
-                } — Weekly Timetable`}
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+            Good Morning, {currentUser.name}
           </h1>
 
           <p className="text-xs text-slate-500 mt-1">
-            Monday through Saturday · 6 Periods per day · Backend-generated timetable
+            Manage your school's timetable.
           </p>
         </div>
 
-        <div className="flex items-center flex-wrap gap-2">
+        {/* Main CTA */}
+        <button
+          type="button"
+          onClick={() => onNavigate('generate')}
+          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors shadow-xs"
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>Generate Timetable</span>
+        </button>
 
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={handleRegenerate}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-              <span>Regenerate</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={handleDownload}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Download</span>
-          </button>
-        </div>
       </div>
 
-      {/* ====================================================== */}
-      {/* FILTERS */}
-      {/* ====================================================== */}
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 
-      {!isTeacher && (
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        {/* Teachers */}
+        <div
+          onClick={() => onNavigate('teachers')}
+          className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:border-slate-300 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
 
-          {/* View mode */}
-          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl w-fit">
+            <span className="text-xs font-medium text-slate-500">
+              Teachers
+            </span>
 
-            <button
-              type="button"
-              onClick={() =>
-                setViewMode('by_section')
-              }
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg ${
-                viewMode === 'by_section'
-                  ? 'bg-white text-slate-900 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <span className="flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5" />
-                <span>
-                  Class / Section
-                </span>
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                setViewMode('by_teacher')
-              }
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg ${
-                viewMode === 'by_teacher'
-                  ? 'bg-white text-slate-900 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <span className="flex items-center gap-1.5">
-                <UserIcon className="w-3.5 h-3.5" />
-                <span>
-                  Teacher View
-                </span>
-              </span>
-            </button>
+            <Users className="w-4 h-4 text-slate-400 group-hover:text-blue-600 transition-colors" />
           </div>
 
-          {/* Selectors */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="text-2xl font-bold text-slate-900 mt-2 tabular-nums">
+            {teachers.length}
+          </div>
 
-            {viewMode === 'by_section' ? (
-              <>
-                {/* Standard */}
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="font-semibold text-slate-700">
-                    Standard:
-                  </span>
+          <div className="text-[11px] text-slate-400 mt-1">
+            5 per standard
+          </div>
+        </div>
 
-                  <select
-                    value={selectedStandardId}
-                    onChange={e =>
-                      setSelectedStandardId(
-                        e.target.value
-                      )
-                    }
-                    className="py-1.5 px-2.5 text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded-xl"
-                  >
-                    {standards.map(
-                      standard => (
-                        <option
-                          key={standard.id}
-                          value={standard.id}
-                        >
-                          {standard.name}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </div>
+        {/* Standards */}
+        <div
+          onClick={() => onNavigate('classes')}
+          className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:border-slate-300 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
 
-                {/* Section */}
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="font-semibold text-slate-700">
-                    Section:
-                  </span>
+            <span className="text-xs font-medium text-slate-500">
+              Standards
+            </span>
 
-                  <select
-                    value={selectedSectionId}
-                    onChange={e =>
-                      setSelectedSectionId(
-                        e.target.value
-                      )
-                    }
-                    className="py-1.5 px-2.5 text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded-xl"
-                  >
-                    {standardSections.map(
-                      section => (
-                        <option
-                          key={section.id}
-                          value={section.id}
-                        >
-                          {section.name}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </div>
-              </>
-            ) : (
-              <div className="flex items-center gap-2 text-xs">
-                <span className="font-semibold text-slate-700">
-                  Teacher:
-                </span>
+            <Layers className="w-4 h-4 text-slate-400 group-hover:text-blue-600 transition-colors" />
+          </div>
 
-                <select
-                  value={selectedTeacherId}
-                  onChange={e =>
-                    setSelectedTeacherId(
-                      e.target.value
-                    )
-                  }
-                  className="py-1.5 px-2.5 text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded-xl"
-                >
-                  {teachers.map(
-                    teacher => (
-                      <option
-                        key={teacher.id}
-                        value={teacher.id}
-                      >
-                        {teacher.name}
-                      </option>
-                    )
-                  )}
-                </select>
+          <div className="text-2xl font-bold text-slate-900 mt-2 tabular-nums">
+            {standards.length}
+          </div>
+
+          <div className="text-[11px] text-slate-400 mt-1">
+            Standard 6 to 10
+          </div>
+        </div>
+
+        {/* Sections */}
+        <div
+          onClick={() => onNavigate('classes')}
+          className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:border-slate-300 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+
+            <span className="text-xs font-medium text-slate-500">
+              Sections
+            </span>
+
+            <Calendar className="w-4 h-4 text-slate-400 group-hover:text-blue-600 transition-colors" />
+          </div>
+
+          <div className="text-2xl font-bold text-slate-900 mt-2 tabular-nums">
+            {sections.length}
+          </div>
+
+          <div className="text-[11px] text-slate-400 mt-1">
+            3 sections per standard
+          </div>
+        </div>
+
+        {/* Subjects */}
+        <div
+          onClick={() => onNavigate('subjects')}
+          className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs hover:border-slate-300 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+
+            <span className="text-xs font-medium text-slate-500">
+              Subjects
+            </span>
+
+            <BookOpen className="w-4 h-4 text-slate-400 group-hover:text-blue-600 transition-colors" />
+          </div>
+
+          <div className="text-2xl font-bold text-slate-900 mt-2 tabular-nums">
+            {subjects.length * standards.length}
+          </div>
+
+          <div className="text-[11px] text-slate-400 mt-1">
+            5 core subjects across standards
+          </div>
+        </div>
+
+      </div>
+
+      {/* Middle Row: Quick Actions & Timetable Status */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* Quick Actions */}
+        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs lg:col-span-2">
+
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-bold text-slate-900">
+              Quick Actions
+            </h2>
+
+            <span className="text-xs text-slate-400">
+              Core administrative tasks
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+
+            <button
+              type="button"
+              onClick={
+                onOpenAddTeacher ||
+                (() => onNavigate('teachers'))
+              }
+              className="flex flex-col items-start p-4 rounded-xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/30 transition-all text-left group"
+            >
+              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                <Plus className="w-4 h-4" />
               </div>
-            )}
 
-            {isAdmin && (
-              <span className="text-[11px] text-slate-400 italic hidden sm:inline ml-2">
-                Click any cell to edit or reassign faculty
+              <span className="text-xs font-bold text-slate-900">
+                Add Teacher
               </span>
-            )}
+
+              <span className="text-[11px] text-slate-500 mt-1">
+                Register faculty and subjects
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={
+                onOpenAddSubject ||
+                (() => onNavigate('subjects'))
+              }
+              className="flex flex-col items-start p-4 rounded-xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/30 transition-all text-left group"
+            >
+              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                <Plus className="w-4 h-4" />
+              </div>
+
+              <span className="text-xs font-bold text-slate-900">
+                Add Subject
+              </span>
+
+              <span className="text-[11px] text-slate-500 mt-1">
+                Set weekly period requirements
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={
+                onOpenAddSection ||
+                (() => onNavigate('classes'))
+              }
+              className="flex flex-col items-start p-4 rounded-xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/30 transition-all text-left group"
+            >
+              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                <Plus className="w-4 h-4" />
+              </div>
+
+              <span className="text-xs font-bold text-slate-900">
+                Add Section
+              </span>
+
+              <span className="text-[11px] text-slate-500 mt-1">
+                Assign standard and division
+              </span>
+            </button>
+
+          </div>
+
+          <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+
+            <span>
+              Need to mark faculty leaves or period blocks?
+            </span>
+
+            <button
+              type="button"
+              onClick={() => onNavigate('availability')}
+              className="font-semibold text-blue-600 hover:text-blue-800 transition-colors flex items-center gap-1"
+            >
+              <span>Teacher Availability Grid</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+
           </div>
         </div>
-      )}
 
-      {/* ====================================================== */}
-      {/* TIMETABLE */}
-      {/* ====================================================== */}
+        {/* Timetable Status Card */}
+        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col justify-between">
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden">
+          <div>
 
-        <div className="overflow-x-auto">
+            <div className="flex items-center justify-between mb-3">
 
-          <table className="w-full text-left text-xs border-collapse">
+              <span className="text-xs font-bold text-slate-900 uppercase tracking-wider text-[11px]">
+                Timetable Status
+              </span>
 
-            <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-700 font-semibold text-[11px] uppercase tracking-wider">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                Ready to Generate
+              </span>
 
-              <tr>
+            </div>
 
-                <th className="py-3.5 px-4 w-36 border-r border-slate-100">
-                  <div className="flex items-center gap-1 text-slate-500">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>
-                      Period / Time
-                    </span>
-                  </div>
-                </th>
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-2 mt-2">
 
-                {DAYS_OF_WEEK.map(day => (
-                  <th
-                    key={day}
-                    className="py-3.5 px-3 text-center min-w-[130px] border-r border-slate-100"
-                  >
-                    <span className="font-bold text-slate-900">
-                      {day}
-                    </span>
-                  </th>
-                ))}
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-500">
+                  Configured Scope
+                </span>
 
-              </tr>
-            </thead>
+                <span className="font-semibold text-slate-800">
+                  Entire School
+                </span>
+              </div>
 
-            <tbody className="divide-y divide-slate-100">
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-500">
+                  Total Weekly Periods
+                </span>
 
-              {PERIOD_SLOTS.map(
-                slot => {
-                  const isAfterPeriod2 =
-                    slot.periodNumber === 3;
+                <span className="font-semibold text-slate-800 tabular-nums">
+                  540 slots
+                </span>
+              </div>
 
-                  const isAfterPeriod4 =
-                    slot.periodNumber === 5;
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-500">
+                  Conflicts Detected
+                </span>
 
-                  return (
-                    <React.Fragment
-                      key={
-                        slot.periodNumber
-                      }
-                    >
+                <span className="font-semibold text-emerald-600">
+                  0 Conflicts
+                </span>
+              </div>
 
-                      {isAfterPeriod2 && (
-                        <tr className="bg-slate-100/50">
-                          <td
-                            colSpan={7}
-                            className="py-1 px-4 text-center text-[10px] font-semibold text-slate-400 uppercase"
-                          >
-                            Short Recess Break · 10:00 AM – 10:15 AM
-                          </td>
-                        </tr>
-                      )}
+            </div>
+          </div>
 
-                      {isAfterPeriod4 && (
-                        <tr className="bg-slate-100/70">
-                          <td
-                            colSpan={7}
-                            className="py-1.5 px-4 text-center text-[10px] font-bold text-slate-500 uppercase"
-                          >
-                            Lunch Break · 11:45 AM – 12:30 PM
-                          </td>
-                        </tr>
-                      )}
+          <div className="mt-6 pt-4 border-t border-slate-100">
 
-                      <tr className="hover:bg-slate-50/30 transition-colors">
+            <button
+              type="button"
+              onClick={() => onNavigate('timetable')}
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+            >
+              <span>View Active Timetable</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </button>
 
-                        <td className="py-3 px-4 border-r border-slate-100 bg-slate-50/40">
-                          <div className="font-bold text-slate-800">
-                            {slot.label}
-                          </div>
-
-                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                            {slot.startTime} -{' '}
-                            {slot.endTime}
-                          </div>
-                        </td>
-
-                        {DAYS_OF_WEEK.map(
-                          day => {
-                            const entry =
-                              getEntryForSlot(
-                                day,
-                                slot.periodNumber
-                              );
-
-                            const subject =
-                              entry
-                                ? getSubject(
-                                    entry.subjectId
-                                  )
-                                : undefined;
-
-                            const teacher =
-                              entry
-                                ? getTeacher(
-                                    entry.teacherId
-                                  )
-                                : undefined;
-
-                            return (
-                              <td
-                                key={day}
-                                onClick={() =>
-                                  handleCellClick(
-                                    day,
-                                    slot.periodNumber
-                                  )
-                                }
-                                className={`p-2 border-r border-slate-100 align-top ${
-                                  isAdmin
-                                    ? 'cursor-pointer hover:bg-blue-50/20'
-                                    : ''
-                                }`}
-                              >
-
-                                {entry ? (
-                                  <div className="p-2.5 rounded-xl border border-blue-200 bg-blue-50">
-
-                                    <div className="flex items-center justify-between mb-1">
-
-                                      <span className="text-xs font-bold text-blue-700">
-                                        {subject?.name ||
-                                          'Unknown Subject'}
-                                      </span>
-
-                                      {subject && (
-                                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-white text-blue-700">
-                                          {subject.code}
-                                        </span>
-                                      )}
-
-                                    </div>
-
-                                    <div className="text-[11px] text-slate-700 font-medium truncate">
-
-                                      {viewMode ===
-                                      'by_teacher'
-                                        ? `Class ${
-                                            sections.find(
-                                              section =>
-                                                section.id ===
-                                                entry.sectionId
-                                            )?.name ||
-                                            entry.sectionId
-                                          }`
-                                        : teacher?.name ||
-                                          'Faculty Member'}
-
-                                    </div>
-
-                                  </div>
-                                ) : (
-                                  <div className="h-16 rounded-xl border border-dashed border-slate-200/80 bg-slate-50/40 flex items-center justify-center text-[11px] text-slate-400 italic">
-                                    Free Period
-                                  </div>
-                                )}
-
-                              </td>
-                            );
-                          }
-                        )}
-
-                      </tr>
-                    </React.Fragment>
-                  );
-                }
-              )}
-
-            </tbody>
-          </table>
+          </div>
         </div>
       </div>
 
-      {/* ====================================================== */}
-      {/* FOOTER */}
-      {/* ====================================================== */}
+      {/* Bottom: Recent Activity */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-2xs">
 
-      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center justify-between mb-4">
 
-        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4 text-slate-500" />
 
-          <span className="font-semibold text-slate-700">
-            Subjects:
+            <h2 className="text-sm font-bold text-slate-900">
+              Recent Activity
+            </h2>
+          </div>
+
+          <span className="text-xs text-slate-400">
+            Audit trail
           </span>
+        </div>
 
-          {subjects.map(subject => (
+        <div className="divide-y divide-slate-100">
+
+          {recentActivities.map(item => (
             <div
-              key={subject.id}
-              className="flex items-center gap-1.5"
+              key={item.id}
+              className="py-3 flex items-center justify-between"
             >
-              <span className="w-3 h-3 rounded-full border bg-blue-50 border-blue-200" />
+              <div className="flex items-center gap-3">
 
-              <span className="text-slate-600">
-                {subject.name}
+                <div className="w-2 h-2 rounded-full bg-blue-600"></div>
+
+                <span className="text-xs font-medium text-slate-700">
+                  {item.action}
+                </span>
+
+              </div>
+
+              <span className="text-[11px] text-slate-400 font-mono tabular-nums">
+                {item.time}
               </span>
             </div>
           ))}
 
         </div>
-
-        <div className="text-[11px] text-slate-400">
-          Showing {currentEntries.length} generated periods · Academic Year 2026-27
-        </div>
       </div>
 
-      {/* ====================================================== */}
-      {/* EDIT MODAL */}
-      {/* ====================================================== */}
-
-      <Modal
-        isOpen={isEditModalOpen}
-        onClose={() =>
-          !isSaving &&
-          setIsEditModalOpen(false)
-        }
-        title={`Edit Slot — ${
-          selectedSection?.name ||
-          editingCell?.sectionId ||
-          ''
-        } (${editingCell?.day}, Period ${
-          editingCell?.period || ''
-        })`}
-        subtitle="Modify subject assignment and faculty with backend validation"
-      >
-
-        {editingCell && (
-          <form
-            onSubmit={handleSaveCell}
-            className="space-y-4"
-          >
-
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
-
-              <div>
-                <span className="text-slate-400 block text-[11px]">
-                  Class & Day
-                </span>
-
-                <span className="font-bold text-slate-800">
-                  {selectedSection?.name ||
-                    editingCell.sectionId}{' '}
-                  · {editingCell.day}
-                </span>
-              </div>
-
-              <div className="text-right">
-                <span className="text-slate-400 block text-[11px]">
-                  Period Slot
-                </span>
-
-                <span className="font-bold text-slate-800">
-                  Period {editingCell.period}
-                </span>
-              </div>
-
-            </div>
-
-            {/* SUBJECT */}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Assign Subject
-              </label>
-
-              <select
-                value={editingCell.subjectId}
-                onChange={e =>
-                  setEditingCell({
-                    ...editingCell,
-                    subjectId:
-                      e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white border border-slate-200 rounded-xl"
-              >
-
-                {subjects.map(
-                  subject => (
-                    <option
-                      key={subject.id}
-                      value={subject.id}
-                    >
-                      {subject.name} (
-                      {subject.code})
-                    </option>
-                  )
-                )}
-
-              </select>
-            </div>
-
-            {/* TEACHER */}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Assign Teacher
-              </label>
-
-              <select
-                value={editingCell.teacherId}
-                onChange={e =>
-                  handleTeacherSelectionChange(
-                    e.target.value
-                  )
-                }
-                className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white border border-slate-200 rounded-xl"
-              >
-
-                {teachers.map(
-                  teacher => (
-                    <option
-                      key={teacher.id}
-                      value={teacher.id}
-                    >
-                      {teacher.name}
-                    </option>
-                  )
-                )}
-
-              </select>
-            </div>
-
-            {/* CONFLICT */}
-
-            {simulatedConflict ? (
-              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs space-y-1">
-
-                <div className="flex items-center gap-1.5 font-bold">
-                  <AlertTriangle className="w-4 h-4 text-amber-600" />
-
-                  <span>
-                    Teacher Conflict Detected
-                  </span>
-                </div>
-
-                <p className="text-[11px] leading-relaxed">
-                  {simulatedConflict.message}
-                </p>
-
-              </div>
-            ) : (
-              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
-
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-
-                <span>
-                  No faculty conflict detected for this period.
-                </span>
-
-              </div>
-            )}
-
-            {/* BUTTONS */}
-
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-
-              <button
-                type="button"
-                disabled={isSaving}
-                onClick={() =>
-                  setIsEditModalOpen(false)
-                }
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50"
-              >
-                {isSaving
-                  ? 'Saving...'
-                  : 'Save Change'}
-              </button>
-
-            </div>
-
-          </form>
-        )}
-
-      </Modal>
     </div>
   );
 };
