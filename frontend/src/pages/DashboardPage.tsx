@@ -23,7 +23,6 @@ import { subjectService } from '../services/subjectService';
 import { sectionService } from '../services/sectionService';
 import { timetableService } from '../services/timetableService';
 import { DAYS_OF_WEEK } from '../data/mockData';
-import { TimetableErrorState } from '../components/common/TimetableErrorState';
 
 interface DashboardPageProps {
   currentUser: User;
@@ -176,11 +175,29 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   if (timetableError) {
     return (
-      <TimetableErrorState
-        message={timetableError}
-        isAdmin={currentUser.role === 'admin'}
-        onRetry={() => window.location.reload()}
-      />
+      <div className="min-h-[400px] flex items-center justify-center">
+        <div className="bg-white border border-red-200 rounded-2xl shadow-2xs px-8 py-6 text-center max-w-md">
+          <div className="w-10 h-10 mx-auto mb-4 rounded-full bg-red-50 border border-red-200 flex items-center justify-center">
+            <Activity className="w-5 h-5 text-red-600" />
+          </div>
+
+          <h2 className="text-sm font-bold text-slate-900">
+            Unable to Load Timetable
+          </h2>
+
+          <p className="text-xs text-slate-500 mt-2">
+            {timetableError}
+          </p>
+
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
     );
   }
 
