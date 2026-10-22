@@ -22,6 +22,7 @@ import {
 import { timetableService } from '../services/timetableService';
 import { sectionService } from '../services/sectionService';
 import { subjectService } from '../services/subjectService';
+import { InlineErrorState } from '../components/common/InlineErrorState';
 import { teacherService } from '../services/teacherService';
 import { DAYS_OF_WEEK, PERIOD_SLOTS } from '../data/mockData';
 import { Modal } from '../components/common/Modal';
@@ -633,35 +634,15 @@ export const TimetableViewPage: React.FC<
    * ============================================================
    */
 
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-[500px]">
-        <div className="max-w-md w-full bg-white border border-red-200 rounded-2xl p-8 text-center shadow-2xs">
-          <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mx-auto">
-            <AlertTriangle className="w-6 h-6 text-red-500" />
-          </div>
-
-          <h2 className="mt-4 text-lg font-bold text-slate-900">
-            Unable to Load Timetable
-          </h2>
-
-          <p className="mt-2 text-sm text-slate-500">
-            {error}
-          </p>
-
-          <button
-            type="button"
-            onClick={loadTimetableData}
-            className="mt-5 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  /*
+if (error) {
+  return (
+    <InlineErrorState
+      title="Unable to Load Timetable"
+      message={error}
+      onRetry={loadTimetableData}
+    />
+  );
+}  /*
    * ============================================================
    * MAIN UI
    * ============================================================
