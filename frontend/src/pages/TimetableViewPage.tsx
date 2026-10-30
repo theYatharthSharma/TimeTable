@@ -26,6 +26,9 @@ import { InlineErrorState } from '../components/common/InlineErrorState';
 import { teacherService } from '../services/teacherService';
 import { DAYS_OF_WEEK, PERIOD_SLOTS } from '../data/mockData';
 import { Modal } from '../components/common/Modal';
+import API_BASE_URL from '../services/apiConfig';
+import { authService } from '../services/authService';
+import { authenticatedFetch } from '../services/authenticatedFetch';
 
 interface TimetableViewPageProps {
   currentUser: User;
@@ -63,23 +66,19 @@ interface BackendTeacher {
   phone?: string | null;
 }
 
-const API_BASE_URL = 'http://127.0.0.1:8000/api/v1';
-
-const getAuthToken = (): string | null => {
-  return localStorage.getItem('timegen_access_token');
-};
-
 const getSchoolId = (): string | null => {
-  return localStorage.getItem('timegen_school_id');
+  const user = authService.getCurrentUser();
+  if (!user) return null;
+  return user.role === 'admin'
+    ? localStorage.getItem('timegen_selected_school_id')
+    : authService.getSchoolId();
 };
-
 const backendRequest = async <T,>(
   endpoint: string
 ): Promise<T> => {
-  const token = getAuthToken();
   const schoolId = getSchoolId();
 
-  if (!token) {
+  if (!authService.getAccessToken()) {
     throw new Error('You are not authenticated. Please log in again.');
   }
 
@@ -91,13 +90,9 @@ const backendRequest = async <T,>(
 
   const separator = endpoint.includes('?') ? '&' : '?';
 
-  const response = await fetch(
-    `${API_BASE_URL}${endpoint}${separator}school_id=${schoolId}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}${endpoint}${separator}school_id=${encodeURIComponent(schoolId)}`,
+    { method: 'GET' }
   );
 
   if (!response.ok) {

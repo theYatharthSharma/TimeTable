@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Settings as SettingsIcon, Save, Calendar, Clock, School, Check } from 'lucide-react';
 import { SchoolSettings, DayOfWeek } from '../types';
 import { settingsService } from '../services/settingsService';
@@ -9,13 +9,30 @@ interface SettingsPageProps {
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ onShowToast }) => {
-  const [settings, setSettings] = useState<SchoolSettings>(() => settingsService.getSettings());
+  const [settings, setSettings] = useState<SchoolSettings | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void settingsService.getSettings().then(value => { if (!cancelled) setSettings(value); })
+      .catch(error => onShowToast(error instanceof Error ? error.message : 'Unable to load school settings.', 'error'))
+      .finally(() => { if (!cancelled) setIsLoading(false); });
+    return () => { cancelled = true; };
+  }, [onShowToast]);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    settingsService.updateSettings(settings);
-    onShowToast('School configuration updated successfully', 'success');
+    if (!settings) return;
+    setIsSaving(true);
+    try {
+      setSettings(await settingsService.updateSettings(settings));
+      onShowToast('School configuration updated successfully', 'success');
+    } catch (error) {
+      onShowToast(error instanceof Error ? error.message : 'Unable to save school settings.', 'error');
+    } finally { setIsSaving(false); }
   };
+  if (isLoading) return <div className="p-10 text-center text-sm text-slate-500">Loading school settings...</div>;
+  if (!settings) return <div className="p-10 text-center text-sm text-rose-600">School settings could not be loaded. Please select a school and retry.</div>;
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -32,11 +49,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onShowToast }) => {
 
         <button
           type="button"
-          onClick={handleSave}
+          disabled={isSaving}
+          onClick={() => void handleSave({ preventDefault() {} } as React.FormEvent)}
           className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors shadow-xs"
         >
           <Save className="w-4 h-4" />
-          <span>Save Settings</span>
+          <span>{isSaving ? 'Saving...' : 'Save Settings'}</span>
         </button>
       </div>
 

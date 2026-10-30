@@ -1,68 +1,19 @@
-import { TeacherAvailability, DayOfWeek } from '../types';
-import { createDefaultAvailability } from '../data/mockData';
+import type { TeacherAvailability } from '../types';
+import { schoolRequest } from './schoolApi';
 
-const AVAILABILITY_KEY = 'timegen_availability';
-
+interface BackendAvailability { teacher_id: string; max_periods_per_day: number; schedule: Record<string, Record<string, boolean>>; }
+function mapAvailability(value: BackendAvailability): TeacherAvailability {
+  return { teacherId: value.teacher_id, maxPeriodsPerDay: value.max_periods_per_day, schedule: value.schedule as TeacherAvailability['schedule'] };
+}
 export const availabilityService = {
-  getAllAvailability(): Record<string, TeacherAvailability> {
-    const saved = localStorage.getItem(AVAILABILITY_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        // Fallback
-      }
-    }
-    return {};
+  async getTeacherAvailability(teacherId: string): Promise<TeacherAvailability> {
+    const value = await schoolRequest<BackendAvailability>(`/availability/${encodeURIComponent(teacherId)}`);
+    return mapAvailability(value);
   },
-
-  saveAllAvailability(data: Record<string, TeacherAvailability>): void {
-    localStorage.setItem(AVAILABILITY_KEY, JSON.stringify(data));
-  },
-
-  getTeacherAvailability(teacherId: string, maxPeriods = 5): TeacherAvailability {
-    const all = this.getAllAvailability();
-    if (all[teacherId]) {
-      return all[teacherId];
-    }
-    const defaultAvail = createDefaultAvailability(teacherId, maxPeriods);
-    all[teacherId] = defaultAvail;
-    this.saveAllAvailability(all);
-    return defaultAvail;
-  },
-
-  updateAvailability(availability: TeacherAvailability): void {
-    const all = this.getAllAvailability();
-    all[availability.teacherId] = availability;
-    this.saveAllAvailability(all);
-  },
-
-  toggleSlot(teacherId: string, day: DayOfWeek, period: number): TeacherAvailability {
-    const avail = this.getTeacherAvailability(teacherId);
-    if (!avail.schedule[day]) {
-      avail.schedule[day] = {};
-    }
-    avail.schedule[day][period] = !avail.schedule[day][period];
-    this.updateAvailability(avail);
-    return avail;
-  },
-
-  setAllDay(teacherId: string, day: DayOfWeek, isAvailable: boolean): TeacherAvailability {
-    const avail = this.getTeacherAvailability(teacherId);
-    if (!avail.schedule[day]) {
-      avail.schedule[day] = {};
-    }
-    for (let p = 1; p <= 6; p++) {
-      avail.schedule[day][p] = isAvailable;
-    }
-    this.updateAvailability(avail);
-    return avail;
-  },
-
-  updateMaxPeriods(teacherId: string, maxPeriods: number): TeacherAvailability {
-    const avail = this.getTeacherAvailability(teacherId);
-    avail.maxPeriodsPerDay = maxPeriods;
-    this.updateAvailability(avail);
-    return avail;
+  async updateAvailability(value: TeacherAvailability): Promise<TeacherAvailability> {
+    const saved = await schoolRequest<BackendAvailability>(`/availability/${encodeURIComponent(value.teacherId)}`, {
+      method: 'PUT', body: JSON.stringify({ schedule: value.schedule, max_periods_per_day: value.maxPeriodsPerDay }),
+    });
+    return mapAvailability(saved);
   },
 };

@@ -1,61 +1,96 @@
-import { Teacher } from '../types';
-import { INITIAL_TEACHERS } from '../data/mockData';
+import type { Teacher, DayOfWeek } from '../types';
+import { getActiveSchoolId, schoolRequest } from './schoolApi';
+import { authService } from './authService';
 
-const TEACHERS_KEY = 'timegen_teachers';
+interface BackendTeacher {
+  id: string; name: string; email: string; phone?: string | null;
+  max_periods_per_day: number; working_days: string[];
+  standard_ids?: string[]; subject_ids?: string[]; section_ids?: string[];
+}
+
+function mapTeacher(value: BackendTeacher): Teacher {
+  return {
+    id: value.id,
+    name: value.name,
+    email: value.email,
+    phone: value.phone ?? undefined,
+    standardIds: value.standard_ids ?? [],
+    subjectIds: value.subject_ids ?? [],
+    sectionIds: value.section_ids ?? [],
+    workingDays: (value.working_days ?? []) as DayOfWeek[],
+    maxPeriodsPerDay: value.max_periods_per_day,
+  };
+}
 
 export const teacherService = {
-  getTeachers(): Teacher[] {
-    const saved = localStorage.getItem(TEACHERS_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        // Fallback
+  async getTeachers(): Promise<Teacher[]> {
+    const data = await schoolRequest<BackendTeacher[]>('/teachers');
+    if (!Array.isArray(data)) throw new Error('Teachers API did not return a list.');
+    return data.map(mapTeacher);
+  },
+  async addTeacher(input: Omit<Teacher, 'id'> & { password?: string }): Promise<Teacher> {
+    const currentUser = authService.getCurrentUser();
+
+    // The master Admin creates the teacher profile and login together.
+    // Principals retain the existing profile-only endpoint and workflow.
+    if (currentUser?.role === 'admin') {
+      if (!input.password || input.password.length < 8) {
+        throw new Error('Set a teacher password with at least 8 characters.');
       }
+
+      await schoolRequest<unknown>('/admin/teachers', {
+        method: 'POST',
+        body: JSON.stringify({
+          school_id: getActiveSchoolId(),
+          name: input.name.trim(),
+          email: input.email.trim(),
+          phone: input.phone ?? null,
+          password: input.password,
+          max_periods_per_day: input.maxPeriodsPerDay,
+          working_days: input.workingDays,
+          standard_ids: input.standardIds,
+          subject_ids: input.subjectIds,
+          section_ids: input.sectionIds,
+        }),
+      });
+
+      // The combined endpoint returns the login account (UserOut), not TeacherOut.
+      // Reload the school-scoped teacher list to return the newly created profile.
+      const teachers = await this.getTeachers();
+      const createdTeacher = teachers.find(
+        teacher => teacher.email.toLowerCase() === input.email.trim().toLowerCase(),
+      );
+      if (!createdTeacher) {
+        throw new Error('Teacher account was created, but the teacher profile could not be reloaded. Refresh the page and check the teacher list.');
+      }
+      return createdTeacher;
     }
-    return INITIAL_TEACHERS;
-  },
 
-  saveTeachers(teachers: Teacher[]): void {
-    localStorage.setItem(TEACHERS_KEY, JSON.stringify(teachers));
+    const created = await schoolRequest<BackendTeacher>('/teachers', {
+      method: 'POST', body: JSON.stringify({
+        name: input.name.trim(), email: input.email.trim(), phone: input.phone ?? null,
+        max_periods_per_day: input.maxPeriodsPerDay, working_days: input.workingDays,
+        standard_ids: input.standardIds, subject_ids: input.subjectIds, section_ids: input.sectionIds,
+      }),
+    });
+    return mapTeacher(created);
   },
-
-  getTeacherById(id: string): Teacher | undefined {
-    return this.getTeachers().find(t => t.id === id);
+  async updateTeacher(id: string, input: Partial<Teacher>): Promise<Teacher> {
+    const updated = await schoolRequest<BackendTeacher>(`/teachers/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify({
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.email !== undefined ? { email: input.email.trim() } : {}),
+        ...(input.phone !== undefined ? { phone: input.phone } : {}),
+        ...(input.maxPeriodsPerDay !== undefined ? { max_periods_per_day: input.maxPeriodsPerDay } : {}),
+        ...(input.workingDays !== undefined ? { working_days: input.workingDays } : {}),
+        ...(input.standardIds !== undefined ? { standard_ids: input.standardIds } : {}),
+        ...(input.subjectIds !== undefined ? { subject_ids: input.subjectIds } : {}),
+        ...(input.sectionIds !== undefined ? { section_ids: input.sectionIds } : {}),
+      }),
+    });
+    return mapTeacher(updated);
   },
-
-  addTeacher(teacher: Omit<Teacher, 'id'>): Teacher {
-    const list = this.getTeachers();
-    const newTeacher: Teacher = {
-      ...teacher,
-      id: `t_${Date.now()}`,
-    };
-    list.push(newTeacher);
-    this.saveTeachers(list);
-    return newTeacher;
-  },
-
-  updateTeacher(id: string, updates: Partial<Teacher>): Teacher | undefined {
-    const list = this.getTeachers();
-    const index = list.findIndex(t => t.id === id);
-    if (index === -1) return undefined;
-    const updated = { ...list[index], ...updates };
-    list[index] = updated;
-    this.saveTeachers(list);
-    return updated;
-  },
-
-  deleteTeacher(id: string): boolean {
-    const list = this.getTeachers();
-    const filtered = list.filter(t => t.id !== id);
-    if (filtered.length !== list.length) {
-      this.saveTeachers(filtered);
-      return true;
-    }
-    return false;
-  },
-
-  resetToDefault(): void {
-    localStorage.removeItem(TEACHERS_KEY);
+  async deleteTeacher(id: string): Promise<void> {
+    await schoolRequest<void>(`/teachers/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 };

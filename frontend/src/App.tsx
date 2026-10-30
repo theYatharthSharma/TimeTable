@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { User } from './types';
 import { authService } from './services/authService';
 import { AppLayout } from './components/layout/AppLayout';
@@ -21,7 +21,15 @@ import { GenerateTimetablePage } from './pages/GenerateTimetablePage';
 import { TimetableViewPage } from './pages/TimetableViewPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
-import  PermissionsPage  from './pages/PermissionsPage';
+import { LeaveRequestsPage } from './pages/LeaveRequestsPage';
+import { NotificationsPage } from './pages/NotificationsPage';
+import { TeacherClassesPage } from './pages/TeacherClassesPage';
+import { TeacherLeavePage } from './pages/TeacherLeavePage';
+import { TeacherSwapsPage } from './pages/TeacherSwapsPage';
+import { TeacherAvailabilityPage } from './pages/TeacherAvailabilityPage';
+import PermissionsPage from './pages/PermissionsPage';
+import SchoolsPage from './pages/SchoolsPage';
+import { getSchools, type School } from './services/adminService';
 
 /*
  * Pages currently supported by the application.
@@ -37,7 +45,14 @@ const VALID_PAGES = [
   'classes',
   'availability',
   'generate',
+  'leave-requests',
+  'notifications',
+  'my-classes',
+  'my-availability',
+  'teacher-leave',
+  'swaps',
   'permissions',
+  'schools',
   'profile',
   'settings',
 ];
@@ -60,8 +75,60 @@ export default function App() {
   /*
    * Current application page.
    */
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      setCurrentUser(null);
+      setCurrentPage('dashboard');
+      setLoginError('Your session expired. Please sign in again.');
+    };
+    window.addEventListener('timegen:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('timegen:session-expired', handleSessionExpired);
+  }, []);
+
   const [currentPage, setCurrentPage] =
     useState<string>('dashboard');
+
+  const [schools, setSchools] = useState<School[]>([]);
+  const [selectedSchoolId, setSelectedSchoolId] = useState<string>(() =>
+    localStorage.getItem('timegen_selected_school_id') || ''
+  );
+
+  useEffect(() => {
+    if (currentUser?.role !== 'admin') {
+      setSchools([]);
+      return;
+    }
+    getSchools().then((items) => {
+      setSchools(items);
+      setSelectedSchoolId((current) => {
+        const saved = items.some((school) => school.id === current) ? current : (items[0]?.id || '');
+        if (saved) localStorage.setItem('timegen_selected_school_id', saved);
+        else localStorage.removeItem('timegen_selected_school_id');
+        return saved;
+      });
+    }).catch((error) => console.error('Unable to load schools for selector:', error));
+  }, [currentUser]);
+
+  const handleSelectSchool = (schoolId: string) => {
+    setSelectedSchoolId(schoolId);
+    if (schoolId) localStorage.setItem('timegen_selected_school_id', schoolId);
+    else localStorage.removeItem('timegen_selected_school_id');
+  };
+
+  const refreshSchools = async () => {
+    try {
+      const items = await getSchools();
+      setSchools(items);
+      setSelectedSchoolId((current) => {
+        const next = items.some((school) => school.id === current) ? current : (items[0]?.id || '');
+        if (next) localStorage.setItem('timegen_selected_school_id', next);
+        else localStorage.removeItem('timegen_selected_school_id');
+        return next;
+      });
+    } catch (error) {
+      console.error('Unable to refresh schools:', error);
+    }
+  };
 
   /*
    * Login error shown on LoginPage.
@@ -257,6 +324,64 @@ export default function App() {
 
   /*
    * -------------------------------------------------------
+   * TEACHER PAGE ACCESS GUARD
+   * -------------------------------------------------------
+   *
+   * Teachers can access only their dashboard, own timetable,
+   * and profile. Backend authorization remains authoritative.
+   */
+  if (
+    currentUser.role === 'teacher' &&
+    !['dashboard', 'timetable', 'profile', 'my-classes', 'my-availability', 'teacher-leave', 'swaps', 'notifications'].includes(currentPage)
+  ) {
+    return (
+      <AppLayout
+        currentUser={currentUser}
+        currentPage={currentPage}
+        onNavigate={handleNavigate}
+        onRoleSwitch={handleRoleSwitch}
+        onLogout={handleLogout}
+        schools={schools}
+        selectedSchoolId={selectedSchoolId}
+        onSelectSchool={handleSelectSchool}
+      >
+        <ErrorPage
+          type="403"
+          title="Access Denied"
+          message="This page is not available to teacher accounts."
+          onGoHome={() => handleNavigate('dashboard')}
+        />
+        <ToastContainer
+          toasts={toasts}
+          onDismiss={handleDismissToast}
+        />
+      </AppLayout>
+    );
+  }
+
+  if (
+    ['my-classes', 'my-availability', 'teacher-leave', 'swaps'].includes(currentPage) &&
+    currentUser.role !== 'teacher'
+  ) {
+    return (
+      <AppLayout currentUser={currentUser} currentPage={currentPage} onNavigate={handleNavigate} onRoleSwitch={handleRoleSwitch} onLogout={handleLogout} schools={schools} selectedSchoolId={selectedSchoolId} onSelectSchool={handleSelectSchool}>
+        <ErrorPage type="403" title="Access Denied" message="This page is available to Teacher accounts." onGoHome={() => handleNavigate('dashboard')} />
+      </AppLayout>
+    );
+  }
+
+  if (currentPage === 'leave-requests' && currentUser.role !== 'principal') {
+    return (
+      <AppLayout currentUser={currentUser} currentPage={currentPage} onNavigate={handleNavigate} onRoleSwitch={handleRoleSwitch} onLogout={handleLogout} schools={schools} selectedSchoolId={selectedSchoolId} onSelectSchool={handleSelectSchool}>
+        <ErrorPage type="403" title="Access Denied" message="Leave request management is available to Principal accounts." onGoHome={() => handleNavigate('dashboard')} />
+      </AppLayout>
+    );
+  }
+
+
+
+  /*
+   * -------------------------------------------------------
    * PAGE ACCESS GUARD
    * -------------------------------------------------------
    *
@@ -269,7 +394,7 @@ export default function App() {
    * a Principal or Teacher should not see the page.
    */
   if (
-    currentPage === 'permissions' &&
+    ['permissions', 'schools'].includes(currentPage) &&
     currentUser.role !== 'admin'
   ) {
     return (
@@ -279,11 +404,14 @@ export default function App() {
         onNavigate={handleNavigate}
         onRoleSwitch={handleRoleSwitch}
         onLogout={handleLogout}
+        schools={schools}
+        selectedSchoolId={selectedSchoolId}
+        onSelectSchool={handleSelectSchool}
       >
         <ErrorPage
           type="403"
           title="Access Denied"
-          message="You do not have permission to manage user access."
+          message="This page is restricted to administrators."
           onGoHome={() =>
             handleNavigate('dashboard')
           }
@@ -317,6 +445,9 @@ export default function App() {
       onNavigate={handleNavigate}
       onRoleSwitch={handleRoleSwitch}
       onLogout={handleLogout}
+      schools={schools}
+      selectedSchoolId={selectedSchoolId}
+      onSelectSchool={handleSelectSchool}
     >
 
       {/* DASHBOARD */}
@@ -377,6 +508,16 @@ export default function App() {
         />
       )}
 
+      {/* PRINCIPAL - LEAVE REQUESTS */}
+      {currentPage === 'leave-requests' && currentUser.role === 'principal' && (
+        <LeaveRequestsPage />
+      )}
+
+      {/* PRINCIPAL - NOTIFICATIONS */}
+      {currentPage === 'notifications' && (
+        <NotificationsPage />
+      )}
+
       {/* TEACHER AVAILABILITY */}
       {currentPage === 'availability' && (
         <AvailabilityPage
@@ -397,6 +538,31 @@ export default function App() {
       {/* ADMIN - MANAGE ACCESS */}
       {currentPage === 'permissions' && (
         <PermissionsPage />
+      )}
+
+      {/* ADMIN - SCHOOL MANAGEMENT */}
+      {currentPage === 'schools' && currentUser.role === 'admin' && (
+        <SchoolsPage onSchoolsChanged={refreshSchools} />
+      )}
+
+      {/* TEACHER - ASSIGNED CLASSES AND SUBJECTS */}
+      {currentPage === 'my-classes' && currentUser.role === 'teacher' && (
+        <TeacherClassesPage />
+      )}
+
+      {/* TEACHER - PERSONAL AVAILABILITY */}
+      {currentPage === 'my-availability' && currentUser.role === 'teacher' && (
+        <TeacherAvailabilityPage />
+      )}
+
+      {/* TEACHER - LEAVE REQUESTS */}
+      {currentPage === 'teacher-leave' && currentUser.role === 'teacher' && (
+        <TeacherLeavePage />
+      )}
+
+      {/* TEACHER - TIMETABLE SWAPS */}
+      {currentPage === 'swaps' && currentUser.role === 'teacher' && (
+        <TeacherSwapsPage />
       )}
 
       {/* PROFILE */}

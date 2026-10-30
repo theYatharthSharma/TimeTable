@@ -1,15 +1,21 @@
+
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_scoped_school_id, require_feature
+from app.api.deps import (
+    get_current_user,
+    get_scoped_school_id,
+    require_feature,
+)
 from app.core.permissions import FeatureCode
 from app.db.session import get_db
 from app.models.availability import TeacherAvailability
 from app.models.school import School
 from app.models.timetable import TimetableEntry
+from app.models.user import User, UserRole
 from app.schemas.timetable import (
     GenerationConfig,
     TimetableEntryOut,
@@ -32,10 +38,14 @@ async def list_entries(
     section_id: uuid.UUID | None = None,
     teacher_id: uuid.UUID | None = None,
     school_id: uuid.UUID = Depends(get_scoped_school_id),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[TimetableEntry]:
     """
-    Return timetable entries for the current school.
+    Return timetable entries for the selected school.
+
+    Teachers can only view their own timetable.
+    Principals and admins retain their existing school-scoped access.
 
     Optional filters:
     - section_id
@@ -46,14 +56,47 @@ async def list_entries(
         TimetableEntry.school_id == school_id
     )
 
-    if section_id:
+    # --------------------------------------------------------
+    # Enforce teacher-specific access
+    # --------------------------------------------------------
+
+    if current_user.role == UserRole.TEACHER:
+        if current_user.teacher_profile_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Your account is not linked to a teacher profile."
+                ),
+            )
+
+        # A teacher cannot request another teacher's timetable.
+        if (
+            teacher_id is not None
+            and teacher_id != current_user.teacher_profile_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only view your own timetable.",
+            )
+
         stmt = stmt.where(
-            TimetableEntry.section_id == section_id
+            TimetableEntry.teacher_id
+            == current_user.teacher_profile_id
         )
 
-    if teacher_id:
+    elif teacher_id is not None:
+        # Preserve filtering for principals and admins.
         stmt = stmt.where(
             TimetableEntry.teacher_id == teacher_id
+        )
+
+    # --------------------------------------------------------
+    # Apply optional section filter
+    # --------------------------------------------------------
+
+    if section_id is not None:
+        stmt = stmt.where(
+            TimetableEntry.section_id == section_id
         )
 
     stmt = stmt.order_by(
@@ -76,9 +119,7 @@ async def list_entries(
     response_model=TimetableEntryOut,
     dependencies=[
         Depends(
-            require_feature(
-                FeatureCode.EDIT_TIMETABLE
-            )
+            require_feature(FeatureCode.EDIT_TIMETABLE)
         )
     ],
 )
@@ -109,6 +150,30 @@ async def upsert_entry(
         )
 
     # --------------------------------------------------------
+    # Find existing timetable entry
+    # --------------------------------------------------------
+
+    existing = await db.execute(
+        select(TimetableEntry).where(
+            TimetableEntry.school_id == school_id,
+            TimetableEntry.section_id == section_id,
+            TimetableEntry.day == day,
+            TimetableEntry.period == period,
+        )
+    )
+
+    entry = existing.scalar_one_or_none()
+
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "No timetable slot exists here yet — "
+                "run timetable generation first."
+            ),
+        )
+
+    # --------------------------------------------------------
     # Check teacher double-booking
     # --------------------------------------------------------
 
@@ -132,13 +197,12 @@ async def upsert_entry(
         )
 
     # --------------------------------------------------------
-    # Check teacher availability
+    # Check teacher availability within this school
     # --------------------------------------------------------
 
     avail = await db.execute(
         select(TeacherAvailability).where(
-            TeacherAvailability.teacher_id
-            == body.teacher_id
+            TeacherAvailability.teacher_id == body.teacher_id
         )
     )
 
@@ -146,7 +210,6 @@ async def upsert_entry(
 
     if availability:
         schedule = availability.schedule or {}
-
         day_schedule = schedule.get(day, {})
 
         is_unavailable = (
@@ -162,30 +225,6 @@ async def upsert_entry(
                     "unavailable for this day/period."
                 ),
             )
-
-    # --------------------------------------------------------
-    # Find existing timetable entry
-    # --------------------------------------------------------
-
-    existing = await db.execute(
-        select(TimetableEntry).where(
-            TimetableEntry.school_id == school_id,
-            TimetableEntry.section_id == section_id,
-            TimetableEntry.day == day,
-            TimetableEntry.period == period,
-        )
-    )
-
-    entry = existing.scalar_one_or_none()
-
-    if entry is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=(
-                "No timetable slot exists here yet — "
-                "run timetable generation first."
-            ),
-        )
 
     # --------------------------------------------------------
     # Update entry
@@ -211,9 +250,7 @@ async def upsert_entry(
     response_model=list[TimetableEntryOut],
     dependencies=[
         Depends(
-            require_feature(
-                FeatureCode.GENERATE_TIMETABLE
-            )
+            require_feature(FeatureCode.GENERATE_TIMETABLE)
         )
     ],
 )
@@ -227,21 +264,9 @@ async def generate_timetable(
     constraint-aware scheduling engine.
 
     Supported scopes:
-
     - entire_school
     - standard
     - section
-
-    The generation engine respects:
-
-    - subject weekly periods
-    - teacher-subject assignments
-    - teacher-section assignments
-    - teacher availability
-    - teacher daily maximum periods
-    - teacher double-booking prevention
-    - locked timetable entries
-    - target generation scope
     """
 
     # --------------------------------------------------------
@@ -249,9 +274,7 @@ async def generate_timetable(
     # --------------------------------------------------------
 
     school_result = await db.execute(
-        select(School).where(
-            School.id == school_id
-        )
+        select(School).where(School.id == school_id)
     )
 
     school = school_result.scalar_one_or_none()
@@ -276,8 +299,7 @@ async def generate_timetable(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "Invalid generation scope. "
-                "Expected one of: "
+                "Invalid generation scope. Expected one of: "
                 "entire_school, standard, section."
             ),
         )
@@ -326,9 +348,5 @@ async def generate_timetable(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-
-    # --------------------------------------------------------
-    # Return generated timetable
-    # --------------------------------------------------------
 
     return entries

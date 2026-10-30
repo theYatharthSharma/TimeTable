@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Sparkles,
   CheckCircle2,
@@ -15,9 +15,8 @@ import {
   Zap,
   Info
 } from 'lucide-react';
-import { GenerationConfig, AiConstraint } from '../types';
+import { GenerationConfig, AiConstraint, Standard, Section } from '../types';
 import { sectionService } from '../services/sectionService';
-import { subjectService } from '../services/subjectService';
 import { timetableService } from '../services/timetableService';
 import { aiService } from '../services/aiService';
 
@@ -38,13 +37,48 @@ export const GenerateTimetablePage: React.FC<GenerateTimetablePageProps> = ({
   onGenerationComplete,
   onShowToast,
 }) => {
-  const standards = sectionService.getStandards();
-  const sections = sectionService.getSections();
+  const [standards, setStandards] = useState<Standard[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
+  const [isLoadingAcademicData, setIsLoadingAcademicData] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAcademicData = async () => {
+      setIsLoadingAcademicData(true);
+      try {
+        const [loadedStandards, loadedSections] = await Promise.all([
+          sectionService.getStandards(),
+          sectionService.getSections(),
+        ]);
+
+        if (!cancelled) {
+          setStandards(loadedStandards);
+          setSections(loadedSections);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Failed to load standards and sections.';
+          onShowToast(message, 'error');
+        }
+      } finally {
+        if (!cancelled) setIsLoadingAcademicData(false);
+      }
+    };
+
+    void loadAcademicData();
+    return () => {
+      cancelled = true;
+    };
+  }, [onShowToast]);
 
   // Step 1: Scope State
   const [scope, setScope] = useState<'entire_school' | 'standard' | 'section'>('entire_school');
-  const [targetStandardId, setTargetStandardId] = useState<number>(8);
-  const [targetSectionId, setTargetSectionId] = useState<string>('8A');
+  const [targetStandardId, setTargetStandardId] = useState<string>('');
+  const [targetSectionId, setTargetSectionId] = useState<string>('');
 
   // Step 2: Constraints State
   const [hardConstraints, setHardConstraints] = useState({
@@ -62,21 +96,11 @@ export const GenerateTimetablePage: React.FC<GenerateTimetablePageProps> = ({
   });
 
   // Step 3: AI Assistant State
-  const [aiPrompt, setAiPrompt] = useState('Keep Mathematics away from the last period.');
-  const [stagedConstraint, setStagedConstraint] = useState<AiConstraint | null>(() =>
-    aiService.interpretPreference('Keep Mathematics away from the last period.')
-  );
-  const [activeAiConstraints, setActiveAiConstraints] = useState<AiConstraint[]>([
-    {
-      id: 'c_default_1',
-      subject: 'Mathematics',
-      preference: 'Avoid',
-      period: 'Last Period (Period 6)',
-      type: 'Soft Constraint',
-      rawText: 'Keep Mathematics away from the last period.',
-      active: true,
-    },
-  ]);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [stagedConstraint, setStagedConstraint] = useState<AiConstraint | null>(null);
+  const [activeAiConstraints, setActiveAiConstraints] = useState<AiConstraint[]>([]);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generatedEntryCount, setGeneratedEntryCount] = useState(0);
 
   // Generation Loading State
   const [isGenerating, setIsGenerating] = useState(false);
@@ -111,35 +135,73 @@ export const GenerateTimetablePage: React.FC<GenerateTimetablePageProps> = ({
     );
   };
 
-  const handleStartGeneration = () => {
+  const handleStartGeneration = async () => {
+    if (isGenerating) return;
+
+    if (scope === 'standard' && targetStandardId === '') {
+      const message = 'Select a standard before generating its timetable.';
+      setGenerationError(message);
+      onShowToast(message, 'error');
+      return;
+    }
+
+    if (scope === 'section' && !targetSectionId) {
+      const message = 'Select a section before generating its timetable.';
+      setGenerationError(message);
+      onShowToast(message, 'error');
+      return;
+    }
+
     setIsGenerating(true);
     setIsSuccess(false);
+    setGenerationError(null);
+    setGeneratedEntryCount(0);
     setCurrentStepIndex(0);
 
     const config: GenerationConfig = {
       scope,
-      targetStandardId: scope === 'standard' ? targetStandardId : undefined,
-      targetSectionId: scope === 'section' ? targetSectionId : undefined,
+      targetStandardId:
+        scope === 'standard' && targetStandardId !== ''
+          ? targetStandardId
+          : undefined,
+      targetSectionId:
+        scope === 'section' ? targetSectionId : undefined,
       hardConstraints,
       softPreferences,
       customAiConstraints: activeAiConstraints.filter(c => c.active),
     };
 
-    // Realistic step progression through the 5 steps
-    const stepInterval = 650;
-    GENERATION_STEPS.forEach((_, idx) => {
-      setTimeout(() => {
-        setCurrentStepIndex(idx);
-      }, idx * stepInterval);
-    });
+    try {
+      // Wait for the real backend request. Never show success before it completes.
+      setCurrentStepIndex(0);
+      const generatedEntries = await timetableService.generateTimetable(config);
 
-    // Complete generation
-    setTimeout(() => {
-      timetableService.generateTimetable(config);
-      setIsGenerating(false);
+      if (!Array.isArray(generatedEntries) || generatedEntries.length === 0) {
+        throw new Error(
+          'The backend returned no timetable entries. Check that this school has ' +
+          'standards, sections, subjects, teachers, and valid teaching assignments.'
+        );
+      }
+
+      setCurrentStepIndex(GENERATION_STEPS.length - 1);
+      setGeneratedEntryCount(generatedEntries.length);
       setIsSuccess(true);
-      onShowToast('Timetable generated successfully with 0 conflicts', 'success');
-    }, GENERATION_STEPS.length * stepInterval + 300);
+      onShowToast(
+        `Timetable generated successfully: ${generatedEntries.length} entries saved/returned.`,
+        'success'
+      );
+    } catch (error) {
+      console.error('Timetable generation failed:', error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Timetable generation failed. Check the backend logs.';
+      setGenerationError(message);
+      setIsSuccess(false);
+      onShowToast(message, 'error');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -174,6 +236,16 @@ export const GenerateTimetablePage: React.FC<GenerateTimetablePageProps> = ({
           </button>
         )}
       </div>
+
+      {generationError && (
+        <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <div className="font-semibold">Timetable generation failed</div>
+            <div className="mt-1">{generationError}</div>
+          </div>
+        </div>
+      )}
 
       {/* Generation Loading State Overlay / Card */}
       {isGenerating && (
@@ -229,7 +301,7 @@ export const GenerateTimetablePage: React.FC<GenerateTimetablePageProps> = ({
                   Timetable Generated Successfully
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  All scheduled periods have been allocated. Teacher availability, weekly quotas, and constraints were fully respected.
+                  The backend returned {generatedEntryCount} timetable entries for the selected school's generation request.
                 </p>
               </div>
             </div>
@@ -257,19 +329,19 @@ export const GenerateTimetablePage: React.FC<GenerateTimetablePageProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-100">
             <div className="p-3 bg-slate-50 rounded-xl">
               <div className="text-[11px] text-slate-500">Periods Assigned</div>
-              <div className="text-lg font-bold text-slate-900 tabular-nums">540 slots</div>
+              <div className="text-lg font-bold text-slate-900 tabular-nums">{generatedEntryCount} entries</div>
             </div>
             <div className="p-3 bg-slate-50 rounded-xl">
               <div className="text-[11px] text-slate-500">Detected Conflicts</div>
-              <div className="text-lg font-bold text-emerald-600 tabular-nums">0 Clashes</div>
+              <div className="text-lg font-bold text-emerald-600 tabular-nums">Backend validated</div>
             </div>
             <div className="p-3 bg-slate-50 rounded-xl">
               <div className="text-[11px] text-slate-500">Weekly Quota Met</div>
-              <div className="text-lg font-bold text-slate-900 tabular-nums">100% Satisfied</div>
+              <div className="text-lg font-bold text-slate-900 tabular-nums">See generation result</div>
             </div>
             <div className="p-3 bg-slate-50 rounded-xl">
               <div className="text-[11px] text-slate-500">Teacher Availability</div>
-              <div className="text-lg font-bold text-slate-900 tabular-nums">Strictly Respected</div>
+              <div className="text-lg font-bold text-slate-900 tabular-nums">Backend validated</div>
             </div>
           </div>
         </div>
@@ -310,7 +382,7 @@ export const GenerateTimetablePage: React.FC<GenerateTimetablePageProps> = ({
                 </div>
                 <div className="text-xs font-bold text-slate-900">Entire School</div>
                 <div className="text-[11px] text-slate-500 mt-0.5">
-                  Generate conflict-free schedule for all 5 standards and 15 sections.
+                  Generate a schedule using this school's saved standards, sections, teachers, and subjects.
                 </div>
               </button>
 
@@ -358,10 +430,16 @@ export const GenerateTimetablePage: React.FC<GenerateTimetablePageProps> = ({
                 </div>
                 <div className="text-xs font-bold text-slate-900">Single Section</div>
                 <div className="text-[11px] text-slate-500 mt-0.5">
-                  Targeted allocation for one individual section (e.g. 8A).
+                  Generate a schedule for one section selected from this school's records.
                 </div>
               </button>
             </div>
+
+            {isLoadingAcademicData && (
+              <p className="mt-3 text-xs text-slate-500">
+                Loading standards and sections...
+              </p>
+            )}
 
             {/* Scope Parameter Pickers */}
             {scope === 'standard' && (
@@ -369,9 +447,10 @@ export const GenerateTimetablePage: React.FC<GenerateTimetablePageProps> = ({
                 <span className="text-xs font-semibold text-slate-700">Select Standard:</span>
                 <select
                   value={targetStandardId}
-                  onChange={e => setTargetStandardId(Number(e.target.value))}
+                  onChange={e => setTargetStandardId(e.target.value)}
                   className="px-3 py-1.5 text-xs text-slate-900 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600"
                 >
+                  <option value="">Select a standard</option>
                   {standards.map(s => (
                     <option key={s.id} value={s.id}>
                       {s.name}
@@ -389,11 +468,15 @@ export const GenerateTimetablePage: React.FC<GenerateTimetablePageProps> = ({
                   onChange={e => setTargetSectionId(e.target.value)}
                   className="px-3 py-1.5 text-xs text-slate-900 bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-600"
                 >
-                  {sections.map(sec => (
-                    <option key={sec.id} value={sec.id}>
-                      Class {sec.id} (Standard {sec.standardId})
-                    </option>
-                  ))}
+                  <option value="">Select a section</option>
+                  {sections.map(sec => {
+                    const standard = standards.find(item => item.id === sec.standardId);
+                    return (
+                      <option key={sec.id} value={sec.id}>
+                        {standard?.name ?? 'Standard'} — Section {sec.name}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             )}
@@ -730,6 +813,7 @@ export const GenerateTimetablePage: React.FC<GenerateTimetablePageProps> = ({
             <button
               type="button"
               onClick={handleStartGeneration}
+              disabled={isGenerating}
               className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-all shadow-md hover:shadow-lg"
             >
               <Sparkles className="w-4 h-4" />

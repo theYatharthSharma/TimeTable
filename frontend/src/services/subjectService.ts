@@ -1,9 +1,21 @@
-import { Subject } from '../types';
-import { INITIAL_SUBJECTS } from '../data/mockData';
+import type { Subject } from '../types';
+import API_BASE_URL from './apiConfig';
+import { authenticatedFetch } from './authenticatedFetch';
+import { schoolRequest } from './schoolApi';
 
-const SUBJECTS_KEY = 'timegen_subjects';
+interface BackendSubject {
+  id: string;
+  name: string;
+  code: string;
+  weekly_periods: number;
+  standard_ids?: string[];
+  standards?: Array<{ id: string; level?: number; name?: string }>;
+  color_bg?: string;
+  color_text?: string;
+  color_border?: string;
+}
 
-const COLOR_PALETTES = [
+const COLORS = [
   { bg: 'bg-blue-50/90', text: 'text-blue-700', border: 'border-blue-200/80' },
   { bg: 'bg-emerald-50/90', text: 'text-emerald-700', border: 'border-emerald-200/80' },
   { bg: 'bg-indigo-50/90', text: 'text-indigo-700', border: 'border-indigo-200/80' },
@@ -14,59 +26,58 @@ const COLOR_PALETTES = [
   { bg: 'bg-sky-50/90', text: 'text-sky-700', border: 'border-sky-200/80' },
 ];
 
+function mapSubject(item: BackendSubject, index: number): Subject {
+  const color = COLORS[index % COLORS.length];
+  const standardIds = item.standard_ids ?? item.standards?.map(s => s.id) ?? [];
+  return {
+    id: item.id,
+    name: item.name,
+    code: item.code,
+    standardIds,
+    weeklyPeriods: item.weekly_periods,
+    colorBg: item.color_bg ?? color.bg,
+    colorText: item.color_text ?? color.text,
+    colorBorder: item.color_border ?? color.border,
+  };
+}
+
 export const subjectService = {
-  getSubjects(): Subject[] {
-    const saved = localStorage.getItem(SUBJECTS_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        // Fallback
-      }
-    }
-    return INITIAL_SUBJECTS;
+  async getSubjects(): Promise<Subject[]> {
+    const data = await schoolRequest<BackendSubject[]>('/subjects');
+    if (!Array.isArray(data)) throw new Error('Subjects API did not return a list.');
+    return data.map(mapSubject);
   },
 
-  saveSubjects(subjects: Subject[]): void {
-    localStorage.setItem(SUBJECTS_KEY, JSON.stringify(subjects));
+  async addSubject(input: Pick<Subject, 'name' | 'code' | 'standardIds' | 'weeklyPeriods'>): Promise<Subject> {
+    const created = await schoolRequest<BackendSubject>('/subjects', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: input.name.trim(),
+        code: input.code.trim().toUpperCase(),
+        weekly_periods: input.weeklyPeriods,
+        standard_ids: input.standardIds,
+      }),
+    });
+    return mapSubject(created, 0);
   },
 
-  getSubjectById(id: string): Subject | undefined {
-    return this.getSubjects().find(s => s.id === id);
+  async updateSubject(
+    id: string,
+    input: Partial<Pick<Subject, 'name' | 'code' | 'standardIds' | 'weeklyPeriods'>>
+  ): Promise<Subject> {
+    const updated = await schoolRequest<BackendSubject>(`/subjects/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.code !== undefined ? { code: input.code.trim().toUpperCase() } : {}),
+        ...(input.weeklyPeriods !== undefined ? { weekly_periods: input.weeklyPeriods } : {}),
+        ...(input.standardIds !== undefined ? { standard_ids: input.standardIds } : {}),
+      }),
+    });
+    return mapSubject(updated, 0);
   },
 
-  addSubject(subject: Omit<Subject, 'id' | 'colorBg' | 'colorText' | 'colorBorder'>): Subject {
-    const list = this.getSubjects();
-    const color = COLOR_PALETTES[list.length % COLOR_PALETTES.length];
-    const newSub: Subject = {
-      ...subject,
-      id: `sub_${Date.now()}`,
-      colorBg: color.bg,
-      colorText: color.text,
-      colorBorder: color.border,
-    };
-    list.push(newSub);
-    this.saveSubjects(list);
-    return newSub;
-  },
-
-  updateSubject(id: string, updates: Partial<Subject>): Subject | undefined {
-    const list = this.getSubjects();
-    const index = list.findIndex(s => s.id === id);
-    if (index === -1) return undefined;
-    const updated = { ...list[index], ...updates };
-    list[index] = updated;
-    this.saveSubjects(list);
-    return updated;
-  },
-
-  deleteSubject(id: string): boolean {
-    const list = this.getSubjects();
-    const filtered = list.filter(s => s.id !== id);
-    if (filtered.length !== list.length) {
-      this.saveSubjects(filtered);
-      return true;
-    }
-    return false;
+  async deleteSubject(id: string): Promise<void> {
+    await schoolRequest<void>(`/subjects/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 };

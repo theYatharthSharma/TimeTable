@@ -1,4 +1,5 @@
 import API_BASE_URL from './apiConfig';
+import { authenticatedFetch } from './authenticatedFetch';
 
 const ACCESS_TOKEN_KEY = 'timegen_access_token';
 
@@ -18,8 +19,17 @@ export interface School {
   academic_year: string;
   working_days: string[];
   periods_per_day: number;
-  period_duration_minutes: number;
-  school_start_time: string;
+  period_duration_min: number;
+  start_time: string;
+}
+
+export interface CreateSchoolRequest {
+  name: string;
+  academic_year?: string;
+  working_days?: string[];
+  periods_per_day?: number;
+  period_duration_min?: number;
+  start_time?: string;
 }
 
 export interface CreatePrincipalRequest {
@@ -41,7 +51,7 @@ async function apiRequest<T>(
     throw new Error('You are not authenticated.');
   }
 
-  const response = await fetch(
+  const response = await authenticatedFetch(
     `${API_BASE_URL}${path}`,
     {
       ...options,
@@ -96,5 +106,47 @@ export async function createPrincipal(
       method: 'POST',
       body: JSON.stringify(data),
     }
+  );
+}
+
+export async function createSchool(data: CreateSchoolRequest): Promise<School> {
+  return apiRequest<School>('/admin/schools', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteSchool(schoolId: string): Promise<void> {
+  await apiRequest<void>(`/admin/schools/${encodeURIComponent(schoolId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function deactivatePrincipal(
+  principalId: string
+): Promise<void> {
+  await apiRequest<void>(
+    `/admin/principals/${encodeURIComponent(principalId)}/deactivate`,
+    {
+      method: 'PATCH',
+    }
+  );
+}
+
+export async function reactivatePrincipal(
+  principalId: string
+): Promise<void> {
+  await apiRequest<void>(
+    `/admin/principals/${encodeURIComponent(principalId)}/reactivate`,
+    { method: 'PATCH' }
+  );
+}
+
+export async function deletePrincipal(
+  principalId: string
+): Promise<void> {
+  await apiRequest<void>(
+    `/admin/principals/${encodeURIComponent(principalId)}`,
+    { method: 'DELETE' }
   );
 }

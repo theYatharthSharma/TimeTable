@@ -1,13 +1,13 @@
 import uuid
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SubjectCreate(BaseModel):
     name: str
     code: str
     weekly_periods: int = 1
-    standard_ids: list[uuid.UUID] = []
+    standard_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class SubjectUpdate(BaseModel):
@@ -19,6 +19,7 @@ class SubjectUpdate(BaseModel):
 
 class SubjectOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     name: str
     code: str
@@ -26,3 +27,4 @@ class SubjectOut(BaseModel):
     color_bg: str
     color_text: str
     color_border: str
+    standard_ids: list[uuid.UUID] = Field(default_factory=list)

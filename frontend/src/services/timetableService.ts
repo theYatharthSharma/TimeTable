@@ -8,22 +8,16 @@ import {
 import { authService } from './authService';
 
 import API_BASE_URL from './apiConfig';
+import { authenticatedFetch } from './authenticatedFetch';
+import { getActiveSchoolId } from './schoolApi';
 
 const getAuthToken = (): string | null => {
-  /*
-   * Your existing authService may use a different localStorage key.
-   * For now we support the common keys used by the frontend.
-   */
-  return (
-    localStorage.getItem('access_token') ||
-    localStorage.getItem('timegen_access_token') ||
-    localStorage.getItem('token')
-  );
+  return authService.getAccessToken();
 };
 
 
 const getSchoolId = (): string | null => {
-  return authService.getSchoolId();
+  try { return getActiveSchoolId(); } catch { return null; }
 };
 
 const apiRequest = async <T>(
@@ -31,6 +25,7 @@ const apiRequest = async <T>(
   options: RequestInit = {}
 ): Promise<T> => {
   const token = getAuthToken();
+  if (!token) throw new Error('You are not authenticated. Please log in again.');
 
   const headers = new Headers(options.headers);
 
@@ -40,7 +35,7 @@ const apiRequest = async <T>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}${endpoint}`, {
     ...options,
     headers,
   });
@@ -65,7 +60,8 @@ const apiRequest = async <T>(
     throw new Error(message);
   }
 
-  return response.json();
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
 };
 
 const requireSchoolId = (): string => {

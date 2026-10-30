@@ -19,6 +19,7 @@ interface BackendUser {
   email: string;
   role: string;
   school_id?: string | null;
+  school_name?: string | null;
   teacher_profile_id?: string | null;
 }
 
@@ -44,9 +45,7 @@ const mapUser = (user: BackendUser): User => {
     name: user.full_name,
     email: user.email,
     role: mapRole(user.role),
-
-    // Temporary static name until /settings is connected.
-    schoolName: 'TimeGen Demo School',
+    schoolName: user.school_name ?? '',
 
     ...(user.school_id
       ? {

@@ -24,8 +24,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   onLogin,
   loginError,
 }) => {
-  const [email, setEmail] = useState('admin@timegen.ai');
-  const [password, setPassword] = useState('timegen@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 

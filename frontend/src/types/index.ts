@@ -5,7 +5,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
-  schoolId : string;
+  schoolId?: string;
   schoolName: string;
   teacherId?: string; // If role is teacher, link to teacher profile
   avatarUrl?: string;
@@ -21,15 +21,15 @@ export interface PeriodSlot {
 }
 
 export interface Standard {
-  id: number;
+  id: string;
   name: string;
   level: number;
 }
 
 export interface Section {
   id: string;
-  standardId: number;
-  name: string; // 'A', 'B', 'C'
+  standardId: string;
+  name: string;
   roomNumber?: string;
   assignedSubjectIds: string[];
   assignedTeacherIds: string[];
@@ -39,7 +39,7 @@ export interface Subject {
   id: string;
   name: string;
   code: string;
-  standardIds: number[];
+  standardIds: string[];
   weeklyPeriods: number;
   colorBg: string;
   colorText: string;
@@ -50,7 +50,7 @@ export interface Teacher {
   id: string;
   name: string;
   email: string;
-  standardIds: number[];
+  standardIds: string[];
   subjectIds: string[];
   sectionIds: string[];
   workingDays: DayOfWeek[];
@@ -68,7 +68,7 @@ export interface TeacherAvailability {
 
 export interface TimetableEntry {
   id: string;
-  standardId: number;
+  standardId: string;
   sectionId: string; // e.g. '8A'
   day: DayOfWeek;
   period: number; // 1 to 6
@@ -100,7 +100,7 @@ export interface AiConstraint {
 
 export interface GenerationConfig {
   scope: 'entire_school' | 'standard' | 'section';
-  targetStandardId?: number;
+  targetStandardId?: string;
   targetSectionId?: string;
   hardConstraints: {
     teacherNoClash: boolean;

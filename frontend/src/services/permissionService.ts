@@ -1,4 +1,5 @@
 import API_BASE_URL from './apiConfig';
+import { authenticatedFetch } from './authenticatedFetch';
 
 const ACCESS_TOKEN_KEY = 'timegen_access_token';
 
@@ -40,7 +41,7 @@ async function apiRequest<T>(
 ): Promise<T> {
   const token = getToken();
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

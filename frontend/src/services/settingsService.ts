@@ -1,25 +1,28 @@
-import { SchoolSettings } from '../types';
-import { INITIAL_SCHOOL_SETTINGS } from '../data/mockData';
+import type { SchoolSettings } from '../types';
+import { schoolRequest } from './schoolApi';
 
-const SETTINGS_KEY = 'timegen_school_settings';
-
+interface BackendSchoolSettings {
+  id: string; name: string; academic_year: string; working_days: string[];
+  periods_per_day: number; period_duration_min: number; start_time: string;
+}
+const mapSettings = (s: BackendSchoolSettings): SchoolSettings => ({
+  schoolName: s.name, academicYear: s.academic_year,
+  workingDays: s.working_days as SchoolSettings['workingDays'],
+  periodsPerDay: s.periods_per_day, periodDurationMin: s.period_duration_min,
+  startTime: s.start_time,
+});
 export const settingsService = {
-  getSettings(): SchoolSettings {
-    const saved = localStorage.getItem(SETTINGS_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        // Fallback
-      }
-    }
-    return INITIAL_SCHOOL_SETTINGS;
+  async getSettings(): Promise<SchoolSettings> {
+    return mapSettings(await schoolRequest<BackendSchoolSettings>('/settings'));
   },
-
-  updateSettings(updates: Partial<SchoolSettings>): SchoolSettings {
-    const current = this.getSettings();
-    const updated = { ...current, ...updates };
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
-    return updated;
+  async updateSettings(updates: SchoolSettings): Promise<SchoolSettings> {
+    const saved = await schoolRequest<BackendSchoolSettings>('/settings', {
+      method: 'PATCH', body: JSON.stringify({
+        name: updates.schoolName, academic_year: updates.academicYear,
+        working_days: updates.workingDays, periods_per_day: updates.periodsPerDay,
+        period_duration_min: updates.periodDurationMin, start_time: updates.startTime,
+      }),
+    });
+    return mapSettings(saved);
   },
 };

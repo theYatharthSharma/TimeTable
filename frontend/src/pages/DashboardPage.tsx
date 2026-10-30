@@ -16,6 +16,9 @@ import {
   User,
   DayOfWeek,
   TimetableEntry,
+  Standard,
+  Section,
+  Subject,
 } from '../types';
 
 import { teacherService } from '../services/teacherService';
@@ -47,10 +50,49 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
    * --------------------------------------------------------------------------
    */
 
-  const teachers = teacherService.getTeachers();
-  const standards = sectionService.getStandards();
-  const sections = sectionService.getSections();
-  const subjects = subjectService.getSubjects();
+  // Teacher API migration is separate; standards, sections, and subjects
+  // are loaded asynchronously from the selected school's backend data.
+  const [teachers, setTeachers] = useState<import('../types').Teacher[]>([]);
+  const [standards, setStandards] = useState<Standard[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadAcademicData = async () => {
+      // Teachers must not fetch school-wide academic records. A dedicated
+      // teacher-self endpoint can supply their own assignments in the next phase.
+      if (currentUser.role === 'teacher') {
+        setStandards([]);
+        setSections([]);
+        setSubjects([]);
+        setTeachers([]);
+        return;
+      }
+
+      try {
+        const [standardsResult, sectionsResult, subjectsResult, teachersResult] = await Promise.all([
+          sectionService.getStandards(), sectionService.getSections(),
+          subjectService.getSubjects(), teacherService.getTeachers(),
+        ]);
+        if (cancelled) return;
+        setStandards(Array.isArray(standardsResult) ? standardsResult : []);
+        setSections(Array.isArray(sectionsResult) ? sectionsResult : []);
+        setSubjects(Array.isArray(subjectsResult) ? subjectsResult : []);
+        setTeachers(Array.isArray(teachersResult) ? teachersResult : []);
+      } catch (error) {
+        console.error('Failed to load school academic data:', error);
+        if (!cancelled) {
+          setStandards([]);
+          setSections([]);
+          setSubjects([]);
+          setTeachers([]);
+        }
+      }
+    };
+    void loadAcademicData();
+    return () => { cancelled = true; };
+  }, [currentUser.id, currentUser.role, currentUser.schoolId, localStorage.getItem('timegen_selected_school_id')]);
 
   /*
    * --------------------------------------------------------------------------
@@ -117,7 +159,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
    */
 
   const teacherProfile = teachers.find(
-    t => t.id === (currentUser.teacherId || 't_11')
+    t => t.id === currentUser.teacherId
   );
 
   const currentDayIndex = new Date().getDay();
@@ -127,21 +169,25 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       ? DAYS_OF_WEEK[currentDayIndex - 1]
       : 'Monday';
 
-  const teacherTodayClasses = teacherProfile
+  const teacherTodayClasses = currentUser.teacherId
     ? allEntries
         .filter(
           entry =>
-            entry.teacherId === teacherProfile.id &&
+            entry.teacherId === currentUser.teacherId &&
             entry.day === todayName
         )
         .sort((a, b) => a.period - b.period)
     : [];
 
-  const teacherWeeklyEntries = teacherProfile
+  const teacherWeeklyEntries = currentUser.teacherId
     ? allEntries.filter(
-        entry => entry.teacherId === teacherProfile.id
+        entry => entry.teacherId === currentUser.teacherId
       )
     : [];
+
+  const teacherTodayPeriods = Array.from(
+    new Set(teacherTodayClasses.map(entry => entry.period))
+  ).sort((a, b) => a - b);
 
   /*
    * --------------------------------------------------------------------------
@@ -184,40 +230,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     />
   );
 }
-  /*
-   * --------------------------------------------------------------------------
-   * Recent mock activities for admin
-   *
-   * These remain frontend-only for now.
-   * --------------------------------------------------------------------------
-   */
-
-  const recentActivities = [
-    {
-      id: '1',
-      action: 'Timetable generated for Academic Year 2026-27',
-      time: '10 mins ago',
-      type: 'generate',
-    },
-    {
-      id: '2',
-      action: 'Teacher availability updated: Mr. Rahul Sharma',
-      time: '1 hour ago',
-      type: 'teacher',
-    },
-    {
-      id: '3',
-      action: 'New section 10C verified with 5 assigned subjects',
-      time: '3 hours ago',
-      type: 'section',
-    },
-    {
-      id: '4',
-      action: 'Subject curriculum quota synchronized for Mathematics',
-      time: 'Yesterday',
-      type: 'subject',
-    },
-  ];
+  // No fabricated activity feed is shown because this backend snapshot has no audit endpoint.
+  const recentActivities: Array<{id: string; action: string; time: string}> = [];
 
   /*
    * ==========================================================================
@@ -237,7 +251,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </h1>
 
             <p className="text-xs text-slate-500 mt-1">
-              Mathematics Faculty · Greenwood International School
+              Your teaching schedule · {currentUser.schoolName || 'Your school'}
             </p>
           </div>
 
@@ -262,7 +276,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
               {teacherTodayClasses.length}{' '}
               <span className="text-xs font-normal text-slate-400">
-                / 6 periods
+                periods scheduled
               </span>
             </div>
 
@@ -284,7 +298,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
 
             <div className="text-[11px] text-slate-500 mt-2">
-              Max allowed: 25 periods/wk
+              Based on timetable entries saved for this school
             </div>
           </div>
 
@@ -294,12 +308,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
 
             <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
-              {teacherProfile?.sectionIds.length || 3}
+              {teacherProfile?.sectionIds.length ?? 0}
             </div>
 
             <div className="text-[11px] text-slate-500 mt-2">
               Sections:{' '}
-              {teacherProfile?.sectionIds.join(', ') || '8A, 8B, 8C'}
+              {teacherProfile?.sectionIds.length ? teacherProfile.sectionIds.join(', ') : 'Assignment details unavailable'}
             </div>
           </div>
         </div>
@@ -325,7 +339,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
 
-            {[1, 2, 3, 4, 5, 6].map(pNum => {
+            {teacherTodayPeriods.map(pNum => {
               const entry = teacherTodayClasses.find(
                 e => e.period === pNum
               );
@@ -349,19 +363,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       Period {pNum}
                     </span>
 
-                    <span className="text-[11px] text-slate-500 font-mono">
-                      {pNum === 1
-                        ? '08:30 - 09:15'
-                        : pNum === 2
-                        ? '09:15 - 10:00'
-                        : pNum === 3
-                        ? '10:15 - 11:00'
-                        : pNum === 4
-                        ? '11:00 - 11:45'
-                        : pNum === 5
-                        ? '12:30 - 01:15'
-                        : '01:15 - 02:00'}
-                    </span>
                   </div>
 
                   {entry ? (
@@ -371,8 +372,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       </div>
 
                       <div className="text-xs font-medium text-blue-700 mt-0.5">
-                        {subject?.name || 'Mathematics'} (
-                        {subject?.code || 'MATH'})
+                        {subject?.name || 'Subject details unavailable'}
+                        {subject?.code ? ` (${subject.code})` : ''}
                       </div>
                     </div>
                   ) : (
@@ -383,7 +384,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 </div>
               );
             })}
-
+            {teacherTodayPeriods.length === 0 && (
+              <div className="col-span-full rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
+                No timetable entries are assigned to you for today.
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -409,7 +414,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </h1>
 
             <p className="text-xs text-slate-500 mt-1">
-              Greenwood International School — Academic Overview &
+              {currentUser.schoolName || 'Your school'} — Academic Overview &
               Timetable Health
             </p>
           </div>
@@ -437,7 +442,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
 
             <div className="text-[11px] text-slate-500 mt-1">
-              Active across 5 standards
+              Teachers assigned to this school
             </div>
           </div>
 
@@ -451,7 +456,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
 
             <div className="text-[11px] text-slate-500 mt-1">
-              Grade 6 through 10
+              Standards configured in this school
             </div>
           </div>
 
@@ -465,7 +470,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
 
             <div className="text-[11px] text-slate-500 mt-1">
-              3 sections per standard
+              Sections saved for this school
             </div>
           </div>
 
@@ -479,7 +484,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
 
             <div className="text-[11px] text-slate-500 mt-1">
-              Curriculum courses
+              Subjects saved for this school
             </div>
           </div>
 
@@ -498,17 +503,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <div className="flex items-center gap-2">
 
                 <h3 className="text-sm font-bold text-slate-900">
-                  School Timetable: Active & Conflict-Free
+                  School Timetable Overview
                 </h3>
 
-                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                  Ready
+                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
+                  allEntries.length > 0
+                    ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                    : 'text-slate-600 bg-slate-50 border-slate-200'
+                }`}>
+                  {allEntries.length > 0 ? 'Available' : 'Not generated'}
                 </span>
               </div>
 
               <p className="text-xs text-slate-500 mt-1">
-                All 15 sections have full 6-period allocations for Monday
-                through Saturday with 0 teacher double-bookings.
+                {allEntries.length} timetable entries are currently saved for this school.
+                Review the timetable to inspect assignments and identify conflicts.
               </p>
             </div>
           </div>
@@ -518,7 +527,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             onClick={() => onNavigate('timetable')}
             className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors"
           >
-            <span>Inspect Class 8A Schedule</span>
+            <span>Inspect School Timetable</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
 
@@ -606,7 +615,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
 
           <div className="text-[11px] text-slate-400 mt-1">
-            Standard 6 to 10
+            Standards configured in this school
           </div>
         </div>
 
@@ -629,7 +638,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
 
           <div className="text-[11px] text-slate-400 mt-1">
-            3 sections per standard
+            Sections saved for this school
           </div>
         </div>
 
@@ -648,11 +657,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
 
           <div className="text-2xl font-bold text-slate-900 mt-2 tabular-nums">
-            {subjects.length * standards.length}
+            {subjects.length}
           </div>
 
           <div className="text-[11px] text-slate-400 mt-1">
-            5 core subjects across standards
+            Subjects configured in this school
           </div>
         </div>
 
@@ -770,9 +779,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 Timetable Status
               </span>
 
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                Ready to Generate
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
+                allEntries.length > 0
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-slate-50 text-slate-600 border-slate-200'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  allEntries.length > 0 ? 'bg-emerald-500' : 'bg-slate-400'
+                }`}></span>
+                {allEntries.length > 0 ? 'Timetable available' : 'Not generated'}
               </span>
 
             </div>
@@ -781,31 +796,31 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
               <div className="flex justify-between text-xs">
                 <span className="text-slate-500">
-                  Configured Scope
+                  Saved Timetable Entries
                 </span>
 
                 <span className="font-semibold text-slate-800">
-                  Entire School
+                  {allEntries.length} entries
                 </span>
               </div>
 
               <div className="flex justify-between text-xs">
                 <span className="text-slate-500">
-                  Total Weekly Periods
+                  Saved Entries
                 </span>
 
                 <span className="font-semibold text-slate-800 tabular-nums">
-                  540 slots
+                  {allEntries.length} entries
                 </span>
               </div>
 
               <div className="flex justify-between text-xs">
                 <span className="text-slate-500">
-                  Conflicts Detected
+                  Conflict Status
                 </span>
 
-                <span className="font-semibold text-emerald-600">
-                  0 Conflicts
+                <span className="font-semibold text-slate-600">
+                  Not evaluated
                 </span>
               </div>
 
@@ -819,7 +834,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               onClick={() => onNavigate('timetable')}
               className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
             >
-              <span>View Active Timetable</span>
+              <span>View Timetable</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </button>
 
@@ -847,7 +862,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
         <div className="divide-y divide-slate-100">
 
-          {recentActivities.map(item => (
+          {recentActivities.length === 0 ? (
+            <p className="py-4 text-xs text-slate-500">No activity records are available yet.</p>
+          ) : recentActivities.map(item => (
             <div
               key={item.id}
               className="py-3 flex items-center justify-between"

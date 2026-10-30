@@ -1,13 +1,16 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_scoped_school_id, require_feature
 from app.core.permissions import FeatureCode
 from app.db.session import get_db
 from app.models.academic import Section, Standard
+from app.models.subject import SubjectStandard
+from app.models.teacher import TeacherStandard
+from app.models.timetable import TimetableEntry
 from app.schemas.academic import SectionCreate, SectionOut, SectionUpdate, StandardCreate, StandardOut
 
 router = APIRouter(prefix="/academic", tags=["standards & sections"])
@@ -91,4 +94,30 @@ async def delete_section(
     if section is None or section.school_id != school_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Section not found.")
     await db.delete(section)
+    await db.commit()
+
+
+@router.delete("/standards/{standard_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[_manage])
+async def delete_standard(
+    standard_id: uuid.UUID,
+    school_id: uuid.UUID = Depends(get_scoped_school_id),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    standard = await db.get(Standard, standard_id)
+    if standard is None or standard.school_id != school_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Standard not found in this school.")
+
+    # Preserve related school data. Ask the admin to remove/reassign dependencies first.
+    sections_count = await db.scalar(select(func.count()).select_from(Section).where(Section.standard_id == standard_id))
+    subject_links_count = await db.scalar(select(func.count()).select_from(SubjectStandard).where(SubjectStandard.standard_id == standard_id))
+    teacher_links_count = await db.scalar(select(func.count()).select_from(TeacherStandard).where(TeacherStandard.standard_id == standard_id))
+    timetable_count = await db.scalar(select(func.count()).select_from(TimetableEntry).where(TimetableEntry.standard_id == standard_id))
+    if any((sections_count, subject_links_count, teacher_links_count, timetable_count)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=("This standard still has related sections, subject assignments, teacher assignments, "
+                    "or timetable entries. Remove or reassign those records before deleting the standard."),
+        )
+
+    await db.delete(standard)
     await db.commit()

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Users,
   Search,
@@ -11,8 +11,9 @@ import {
   Clock,
   BookOpen
 } from 'lucide-react';
-import { Teacher, DayOfWeek } from '../types';
+import { Teacher, DayOfWeek, Standard, Section } from '../types';
 import { teacherService } from '../services/teacherService';
+import { authService } from '../services/authService';
 import { subjectService } from '../services/subjectService';
 import { sectionService } from '../services/sectionService';
 import { DAYS_OF_WEEK } from '../data/mockData';
@@ -24,37 +25,80 @@ interface TeachersPageProps {
 }
 
 export const TeachersPage: React.FC<TeachersPageProps> = ({ onShowToast, openAddModalOnMount = false }) => {
-  const [teachers, setTeachers] = useState<Teacher[]>(() => teacherService.getTeachers());
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [subjects, setSubjects] = useState<import('../types').Subject[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [teacherPassword, setTeacherPassword] = useState('');
+  const isAdmin = authService.getCurrentUser()?.role === 'admin';
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStandardFilter, setSelectedStandardFilter] = useState<number | 'all'>('all');
+  const [selectedStandardFilter, setSelectedStandardFilter] = useState<string | 'all'>('all');
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(openAddModalOnMount);
   const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
 
   // Form State
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    name: string; email: string; standardIds: string[]; subjectIds: string[]; sectionIds: string[]; workingDays: DayOfWeek[]; maxPeriodsPerDay: number;
+  }>({
     name: '',
     email: '',
-    standardIds: [8],
-    subjectIds: ['sub_math'],
-    sectionIds: ['8A', '8B'],
+    standardIds: [],
+    subjectIds: [],
+    sectionIds: [],
     workingDays: DAYS_OF_WEEK,
     maxPeriodsPerDay: 5,
   });
 
-  const subjects = subjectService.getSubjects();
-  const standards = sectionService.getStandards();
-  const allSections = sectionService.getSections();
+  const [standards, setStandards] = useState<Standard[]>([]);
+  const [allSections, setAllSections] = useState<Section[]>([]);
+  const [isLoadingStandards, setIsLoadingStandards] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAcademicData = async () => {
+      setIsLoadingStandards(true);
+      try {
+        const [loadedStandards, loadedSections, loadedTeachers, loadedSubjects] = await Promise.all([
+          sectionService.getStandards(), sectionService.getSections(),
+          teacherService.getTeachers(), subjectService.getSubjects(),
+        ]);
+        if (!cancelled) {
+          setStandards(loadedStandards);
+          setAllSections(loadedSections);
+          setTeachers(loadedTeachers);
+          setSubjects(loadedSubjects);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          onShowToast(
+            error instanceof Error
+              ? error.message
+              : 'Failed to load standards and sections.',
+            'error'
+          );
+        }
+      } finally {
+        if (!cancelled) setIsLoadingStandards(false);
+      }
+    };
+
+    void loadAcademicData();
+    return () => {
+      cancelled = true;
+    };
+  }, [onShowToast]);
 
   const handleOpenAdd = () => {
     setEditingTeacher(null);
+    setTeacherPassword('');
     setFormData({
       name: '',
       email: '',
-      standardIds: [8],
-      subjectIds: ['sub_math'],
-      sectionIds: ['8A', '8B'],
+      standardIds: [],
+      subjectIds: [],
+      sectionIds: [],
       workingDays: DAYS_OF_WEEK,
       maxPeriodsPerDay: 5,
     });
@@ -63,6 +107,7 @@ export const TeachersPage: React.FC<TeachersPageProps> = ({ onShowToast, openAdd
 
   const handleOpenEdit = (t: Teacher) => {
     setEditingTeacher(t);
+    setTeacherPassword('');
     setFormData({
       name: t.name,
       email: t.email,
@@ -75,23 +120,32 @@ export const TeachersPage: React.FC<TeachersPageProps> = ({ onShowToast, openAdd
     setIsModalOpen(true);
   };
 
-  const handleDelete = (id: string, name: string) => {
-    if (confirm(`Are you sure you want to remove ${name}?`)) {
-      teacherService.deleteTeacher(id);
-      setTeachers(teacherService.getTeachers());
-      onShowToast(`${name} removed successfully`, 'info');
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to remove ${name}?`)) return;
+    try {
+      await teacherService.deleteTeacher(id);
+      setTeachers(await teacherService.getTeachers());
+      onShowToast(`${name} removed successfully`, 'success');
+    } catch (error) {
+      onShowToast(error instanceof Error ? error.message : 'Unable to delete teacher.', 'error');
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim() || !formData.email.trim()) {
       onShowToast('Please fill in name and email.', 'error');
       return;
     }
+    if (!editingTeacher && isAdmin && teacherPassword.length < 8) {
+      onShowToast('Set a teacher password with at least 8 characters.', 'error');
+      return;
+    }
 
+    setIsSaving(true);
+    try {
     if (editingTeacher) {
-      teacherService.updateTeacher(editingTeacher.id, {
+      await teacherService.updateTeacher(editingTeacher.id, {
         name: formData.name,
         email: formData.email,
         standardIds: formData.standardIds,
@@ -102,7 +156,7 @@ export const TeachersPage: React.FC<TeachersPageProps> = ({ onShowToast, openAdd
       });
       onShowToast(`Updated ${formData.name} successfully`, 'success');
     } else {
-      teacherService.addTeacher({
+      await teacherService.addTeacher({
         name: formData.name,
         email: formData.email,
         standardIds: formData.standardIds,
@@ -110,12 +164,16 @@ export const TeachersPage: React.FC<TeachersPageProps> = ({ onShowToast, openAdd
         sectionIds: formData.sectionIds,
         workingDays: formData.workingDays,
         maxPeriodsPerDay: formData.maxPeriodsPerDay,
+        ...(isAdmin ? { password: teacherPassword } : {}),
       });
       onShowToast(`Added teacher ${formData.name}`, 'success');
     }
 
-    setTeachers(teacherService.getTeachers());
+    setTeachers(await teacherService.getTeachers());
     setIsModalOpen(false);
+    } catch (error) {
+      onShowToast(error instanceof Error ? error.message : 'Unable to save teacher.', 'error');
+    } finally { setIsSaving(false); }
   };
 
   const filteredTeachers = teachers.filter(t => {
@@ -123,7 +181,8 @@ export const TeachersPage: React.FC<TeachersPageProps> = ({ onShowToast, openAdd
       t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.email.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStandard =
-      selectedStandardFilter === 'all' || t.standardIds.includes(selectedStandardFilter);
+      selectedStandardFilter === 'all' ||
+      t.standardIds.some(id => String(id) === selectedStandardFilter);
     return matchesSearch && matchesStandard;
   });
 
@@ -167,7 +226,7 @@ export const TeachersPage: React.FC<TeachersPageProps> = ({ onShowToast, openAdd
           <select
             value={selectedStandardFilter}
             onChange={e =>
-              setSelectedStandardFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))
+              setSelectedStandardFilter(e.target.value === 'all' ? 'all' : e.target.value)
             }
             className="py-1.5 px-2.5 text-xs text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600"
           >
@@ -323,20 +382,38 @@ export const TeachersPage: React.FC<TeachersPageProps> = ({ onShowToast, openAdd
             />
           </div>
 
+          {!editingTeacher && isAdmin && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Initial Password
+              </label>
+              <input
+                type="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+                placeholder="At least 8 characters"
+                value={teacherPassword}
+                onChange={e => setTeacherPassword(e.target.value)}
+                className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600"
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                Share this password securely with the teacher. The system stores only a password hash.
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Standard (Grade)
               </label>
               <select
-                value={formData.standardIds[0] || 8}
+                value={formData.standardIds[0] || ''}
                 onChange={e => {
-                  const std = Number(e.target.value);
-                  setFormData({
-                    ...formData,
-                    standardIds: [std],
-                    sectionIds: [`${std}A`, `${std}B`],
-                  });
+                  const standardId = e.target.value;
+                  const validSectionIds = allSections.filter(section => section.standardId === standardId).map(section => section.id);
+                  setFormData({ ...formData, standardIds: standardId ? [standardId] : [], sectionIds: validSectionIds.filter(id => formData.sectionIds.includes(id)) });
                 }}
                 className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-600"
               >
@@ -381,7 +458,7 @@ export const TeachersPage: React.FC<TeachersPageProps> = ({ onShowToast, openAdd
                       const newSubs = isSelected
                         ? formData.subjectIds.filter(id => id !== s.id)
                         : [...formData.subjectIds, s.id];
-                      setFormData({ ...formData, subjectIds: newSubs.length ? newSubs : [s.id] });
+                      setFormData({ ...formData, subjectIds: newSubs });
                     }}
                     className={`flex items-center justify-between p-2 rounded-xl border text-xs text-left transition-all ${
                       isSelected
@@ -403,9 +480,8 @@ export const TeachersPage: React.FC<TeachersPageProps> = ({ onShowToast, openAdd
               Assigned Sections
             </label>
             <div className="flex flex-wrap gap-2">
-              {['A', 'B', 'C'].map(secLetter => {
-                const currentStd = formData.standardIds[0] || 8;
-                const secId = `${currentStd}${secLetter}`;
+              {allSections.filter(section => formData.standardIds.includes(section.standardId)).map(section => {
+                const secId = section.id;
                 const isSelected = formData.sectionIds.includes(secId);
 
                 return (
@@ -418,7 +494,7 @@ export const TeachersPage: React.FC<TeachersPageProps> = ({ onShowToast, openAdd
                         : [...formData.sectionIds, secId];
                       setFormData({
                         ...formData,
-                        sectionIds: newSecs.length ? newSecs : [secId],
+                        sectionIds: newSecs,
                       });
                     }}
                     className={`px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${
